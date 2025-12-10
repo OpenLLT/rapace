@@ -1549,6 +1549,7 @@ dependencies = [
  "rapace-macros",
  "rapace-registry",
  "rapace-testkit",
+ "rapace-tracing",
  "rapace-transport-mem",
  "rapace-transport-shm",
  "rapace-transport-stream",

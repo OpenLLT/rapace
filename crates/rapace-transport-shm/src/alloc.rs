@@ -90,7 +90,6 @@ impl ShmAllocator {
         header_layout
             .extend(user_layout)
             .map_err(|_| AllocError)
-            .map(|(layout, offset)| (layout, offset))
     }
 }
 

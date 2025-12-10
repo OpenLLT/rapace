@@ -163,7 +163,7 @@ pub mod transport {
 ///
 /// Enable with `features = ["tracing"]`.
 #[cfg(feature = "tracing")]
-pub mod tracing {
+pub mod distributed_tracing {
     pub use rapace_tracing::*;
 }
 

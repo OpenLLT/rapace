@@ -2204,7 +2204,8 @@ mod registry_tests {
 
         // Create a registry-aware client and verify it uses the correct IDs
         let (client_transport, _server_transport) = InProcTransport::pair();
-        let client = AdderRegistryClient::new(Arc::new(client_transport), &registry);
+        let session = RpcSession::new(Arc::new(client_transport));
+        let client = AdderRegistryClient::new(session, &registry);
 
         // The client should have the correct method ID stored
         assert_eq!(client.add_method_id, 1);
