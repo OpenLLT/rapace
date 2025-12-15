@@ -21,7 +21,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use rapace_core::{
     DecodeError, EncodeCtx, EncodeError, Frame, INLINE_PAYLOAD_SIZE, INLINE_PAYLOAD_SLOT,
-    MsgDescHot, RecvFrame, Transport, TransportError,
+    MsgDescHot, RecvFrame, SendFrame, TransportError, TransportHandle,
 };
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, ReadHalf, WriteHalf};
 use tokio::sync::Mutex as AsyncMutex;
@@ -38,6 +38,15 @@ const _: () = assert!(std::mem::size_of::<MsgDescHot>() == DESC_SIZE);
 /// Uses split read/write halves for full-duplex operation.
 pub struct StreamTransport<R, W> {
     inner: Arc<StreamInner<R, W>>,
+}
+
+// Manual Clone impl - we only clone the Arc, not the inner R, W types
+impl<R, W> Clone for StreamTransport<R, W> {
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+        }
+    }
 }
 
 struct StreamInner<R, W> {
@@ -107,21 +116,30 @@ fn bytes_to_desc(bytes: &[u8; DESC_SIZE]) -> MsgDescHot {
     unsafe { std::mem::transmute_copy(bytes) }
 }
 
-impl<R, W> Transport for StreamTransport<R, W>
+impl<R, W> StreamTransport<R, W> {
+    /// Check if the transport is closed.
+    pub fn is_closed(&self) -> bool {
+        self.inner.closed.load(Ordering::Acquire)
+    }
+}
+
+impl<R, W> TransportHandle for StreamTransport<R, W>
 where
     R: AsyncRead + Unpin + Send + Sync + 'static,
     W: AsyncWrite + Unpin + Send + Sync + 'static,
 {
-    /// Payload type for received frames.
-    /// For now we use `Vec<u8>`; Phase 2 will introduce pooled buffers.
+    type SendPayload = Vec<u8>;
     type RecvPayload = Vec<u8>;
 
-    async fn send_frame(&self, frame: &Frame) -> Result<(), TransportError> {
+    async fn send_frame(
+        &self,
+        frame: impl Into<SendFrame<Self::SendPayload>>,
+    ) -> Result<(), TransportError> {
         if self.is_closed() {
             return Err(TransportError::Closed);
         }
 
-        let payload = frame.payload();
+        let payload = frame.payload_bytes();
         let frame_len = DESC_SIZE + payload.len();
 
         // Serialize descriptor
@@ -219,19 +237,11 @@ where
         }
     }
 
-    fn encoder(&self) -> Box<dyn EncodeCtx + '_> {
-        Box::new(StreamEncoder::new())
-    }
-
-    async fn close(&self) -> Result<(), TransportError> {
+    fn close(&self) {
         self.inner.closed.store(true, Ordering::Release);
-        Ok(())
     }
-}
 
-impl<R, W> StreamTransport<R, W> {
-    /// Check if the transport is closed.
-    pub fn is_closed(&self) -> bool {
+    fn is_closed(&self) -> bool {
         self.inner.closed.load(Ordering::Acquire)
     }
 }

@@ -20,7 +20,7 @@
 
 use std::sync::Arc;
 
-use rapace_core::{ErrorCode, Frame, FrameFlags, MsgDescHot, RpcError, Transport};
+use rapace_core::{ErrorCode, Frame, FrameFlags, MsgDescHot, RpcError};
 
 use crate::RpcSession;
 use crate::{TestError, TransportFactory};
@@ -57,14 +57,13 @@ pub async fn run_bidirectional_scenario<F: TransportFactory>(scenario: Bidirecti
 
 async fn run_simple_echo<F: TransportFactory>() -> Result<(), TestError> {
     let (transport_a, transport_b) = F::connect_pair().await?;
-    let transport_a = Arc::new(transport_a);
-    let transport_b = Arc::new(transport_b);
+    // Transports are Clone (have internal Arc), no need to wrap in Arc
 
     // Session A (uses odd channel IDs)
-    let session_a = Arc::new(RpcSession::with_channel_start(transport_a.clone(), 1));
+    let session_a = Arc::new(RpcSession::with_channel_start(transport_a, 1));
 
     // Session B (uses even channel IDs) - simple echo dispatcher
-    let session_b = Arc::new(RpcSession::with_channel_start(transport_b.clone(), 2));
+    let session_b = Arc::new(RpcSession::with_channel_start(transport_b, 2));
     session_b.set_dispatcher(|_channel_id, _method_id, payload| async move {
         // Echo: respond with the same payload
         let mut desc = MsgDescHot::new();
@@ -74,10 +73,10 @@ async fn run_simple_echo<F: TransportFactory>() -> Result<(), TestError> {
 
     // Spawn demux loops
     let session_a_clone = session_a.clone();
-    let handle_a = tokio::spawn(async move { session_a_clone.run().await });
+    let driver_a = tokio::spawn(async move { session_a_clone.run().await });
 
     let session_b_clone = session_b.clone();
-    let handle_b = tokio::spawn(async move { session_b_clone.run().await });
+    let driver_b = tokio::spawn(async move { session_b_clone.run().await });
 
     // A calls B
     let channel_id = session_a.next_channel_id();
@@ -94,10 +93,10 @@ async fn run_simple_echo<F: TransportFactory>() -> Result<(), TestError> {
     }
 
     // Cleanup
-    let _ = transport_a.close().await;
-    let _ = transport_b.close().await;
-    handle_a.abort();
-    handle_b.abort();
+    session_a.close();
+    session_b.close();
+    driver_a.abort();
+    driver_b.abort();
 
     Ok(())
 }
@@ -108,12 +107,11 @@ async fn run_simple_echo<F: TransportFactory>() -> Result<(), TestError> {
 
 async fn run_nested_callback<F: TransportFactory>() -> Result<(), TestError> {
     let (transport_a, transport_b) = F::connect_pair().await?;
-    let transport_a = Arc::new(transport_a);
-    let transport_b = Arc::new(transport_b);
+    // Transports are Clone (have internal Arc), no need to wrap
 
     // Session A (uses odd channel IDs)
     // A provides a "get_prefix" service: returns "PREFIX:"
-    let session_a = Arc::new(RpcSession::with_channel_start(transport_a.clone(), 1));
+    let session_a = Arc::new(RpcSession::with_channel_start(transport_a, 1));
     session_a.set_dispatcher(|_channel_id, method_id, _payload| async move {
         // method 1 = get_prefix
         if method_id == 1 {
@@ -131,7 +129,7 @@ async fn run_nested_callback<F: TransportFactory>() -> Result<(), TestError> {
 
     // Session B (uses even channel IDs)
     // B provides a "format" service: calls A's get_prefix, then appends the input
-    let session_b = Arc::new(RpcSession::with_channel_start(transport_b.clone(), 2));
+    let session_b = Arc::new(RpcSession::with_channel_start(transport_b, 2));
     let session_b_for_dispatcher = session_b.clone();
     session_b.set_dispatcher(move |_channel_id, method_id, payload| {
         let session = session_b_for_dispatcher.clone();
@@ -167,10 +165,10 @@ async fn run_nested_callback<F: TransportFactory>() -> Result<(), TestError> {
 
     // Spawn demux loops
     let session_a_clone = session_a.clone();
-    let handle_a = tokio::spawn(async move { session_a_clone.run().await });
+    let driver_a = tokio::spawn(async move { session_a_clone.run().await });
 
     let session_b_clone = session_b.clone();
-    let handle_b = tokio::spawn(async move { session_b_clone.run().await });
+    let driver_b = tokio::spawn(async move { session_b_clone.run().await });
 
     // A calls B's format service
     let channel_id = session_a.next_channel_id();
@@ -187,10 +185,10 @@ async fn run_nested_callback<F: TransportFactory>() -> Result<(), TestError> {
     }
 
     // Cleanup
-    let _ = transport_a.close().await;
-    let _ = transport_b.close().await;
-    handle_a.abort();
-    handle_b.abort();
+    session_a.close();
+    session_b.close();
+    driver_a.abort();
+    driver_b.abort();
 
     Ok(())
 }
@@ -201,12 +199,11 @@ async fn run_nested_callback<F: TransportFactory>() -> Result<(), TestError> {
 
 async fn run_multiple_nested<F: TransportFactory>() -> Result<(), TestError> {
     let (transport_a, transport_b) = F::connect_pair().await?;
-    let transport_a = Arc::new(transport_a);
-    let transport_b = Arc::new(transport_b);
+    // Transports are Clone (have internal Arc), no need to wrap
 
     // Session A (uses odd channel IDs)
     // A provides a "get_value" service: returns "value_N" where N is from the request
-    let session_a = Arc::new(RpcSession::with_channel_start(transport_a.clone(), 1));
+    let session_a = Arc::new(RpcSession::with_channel_start(transport_a, 1));
     session_a.set_dispatcher(|_channel_id, method_id, payload| async move {
         // method 1 = get_value
         if method_id == 1 {
@@ -226,7 +223,7 @@ async fn run_multiple_nested<F: TransportFactory>() -> Result<(), TestError> {
 
     // Session B (uses even channel IDs)
     // B provides a "combine" service: calls A's get_value 3 times and combines results
-    let session_b = Arc::new(RpcSession::with_channel_start(transport_b.clone(), 2));
+    let session_b = Arc::new(RpcSession::with_channel_start(transport_b, 2));
     let session_b_for_dispatcher = session_b.clone();
     session_b.set_dispatcher(move |_channel_id, method_id, _payload| {
         let session = session_b_for_dispatcher.clone();
@@ -269,10 +266,10 @@ async fn run_multiple_nested<F: TransportFactory>() -> Result<(), TestError> {
 
     // Spawn demux loops
     let session_a_clone = session_a.clone();
-    let handle_a = tokio::spawn(async move { session_a_clone.run().await });
+    let driver_a = tokio::spawn(async move { session_a_clone.run().await });
 
     let session_b_clone = session_b.clone();
-    let handle_b = tokio::spawn(async move { session_b_clone.run().await });
+    let driver_b = tokio::spawn(async move { session_b_clone.run().await });
 
     // A calls B's combine service
     let channel_id = session_a.next_channel_id();
@@ -291,10 +288,10 @@ async fn run_multiple_nested<F: TransportFactory>() -> Result<(), TestError> {
     }
 
     // Cleanup
-    let _ = transport_a.close().await;
-    let _ = transport_b.close().await;
-    handle_a.abort();
-    handle_b.abort();
+    session_a.close();
+    session_b.close();
+    driver_a.abort();
+    driver_b.abort();
 
     Ok(())
 }

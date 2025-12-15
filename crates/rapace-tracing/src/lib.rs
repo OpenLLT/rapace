@@ -54,7 +54,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use parking_lot::Mutex;
-use rapace::{Frame, RpcError, RpcSession, Transport};
+use rapace::{Frame, RpcError, RpcSession, TransportHandle};
 use tracing::span::{Attributes, Record};
 use tracing::{Event, Id, Subscriber};
 use tracing_subscriber::Layer;
@@ -278,7 +278,7 @@ pub fn create_tracing_config_dispatcher(
 ///
 /// The layer uses a `SharedFilter` to apply host-controlled filtering locally,
 /// avoiding unnecessary RPC calls for filtered events.
-pub struct RapaceTracingLayer<T: Transport + Send + Sync + 'static> {
+pub struct RapaceTracingLayer<T: TransportHandle<SendPayload = Vec<u8>> + Send + Sync + 'static> {
     session: Arc<RpcSession<T>>,
     /// Maps local tracing span IDs to our u64 IDs used in RPC
     span_ids: Mutex<HashMap<u64, u64>>,
@@ -290,7 +290,7 @@ pub struct RapaceTracingLayer<T: Transport + Send + Sync + 'static> {
     filter: SharedFilter,
 }
 
-impl<T: Transport + Send + Sync + 'static> RapaceTracingLayer<T> {
+impl<T: TransportHandle<SendPayload = Vec<u8>> + Send + Sync + 'static> RapaceTracingLayer<T> {
     /// Create a new layer that forwards to the given RPC session.
     ///
     /// The session should be connected to a host that implements TracingSink.
@@ -398,7 +398,7 @@ impl<T: Transport + Send + Sync + 'static> RapaceTracingLayer<T> {
 impl<S, T> Layer<S> for RapaceTracingLayer<T>
 where
     S: Subscriber + for<'a> LookupSpan<'a>,
-    T: Transport + Send + Sync + 'static,
+    T: TransportHandle<SendPayload = Vec<u8>> + Send + Sync + 'static,
 {
     fn enabled(&self, metadata: &tracing::Metadata<'_>, _ctx: Context<'_, S>) -> bool {
         // Avoid infinite recursion: don't forward events about rapace_tracing itself

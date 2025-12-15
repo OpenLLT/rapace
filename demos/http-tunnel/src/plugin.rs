@@ -11,7 +11,7 @@
 use std::pin::Pin;
 use std::sync::Arc;
 
-use rapace::{Frame, RpcError, RpcSession, Transport};
+use rapace::{Frame, RpcError, RpcSession, TransportHandle};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
@@ -30,13 +30,13 @@ pub const CHUNK_SIZE: usize = 4096;
 /// 1. Allocates a new channel_id
 /// 2. Connects to the local HTTP server
 /// 3. Spawns tasks to bridge rapace ↔ TCP
-pub struct TcpTunnelImpl<T: Transport> {
+pub struct TcpTunnelImpl<T: TransportHandle<SendPayload = Vec<u8>>> {
     session: Arc<RpcSession<T>>,
     internal_port: u16,
     metrics: Arc<GlobalTunnelMetrics>,
 }
 
-impl<T: Transport + Send + Sync + 'static> TcpTunnelImpl<T> {
+impl<T: TransportHandle<SendPayload = Vec<u8>>> TcpTunnelImpl<T> {
     pub fn new(session: Arc<RpcSession<T>>, internal_port: u16) -> Self {
         Self {
             session,
@@ -62,7 +62,7 @@ impl<T: Transport + Send + Sync + 'static> TcpTunnelImpl<T> {
     }
 }
 
-impl<T: Transport + Send + Sync + 'static> TcpTunnel for TcpTunnelImpl<T> {
+impl<T: TransportHandle<SendPayload = Vec<u8>>> TcpTunnel for TcpTunnelImpl<T> {
     async fn open(&self) -> TunnelHandle {
         // Allocate a channel for this tunnel
         let channel_id = self.session.next_channel_id();
@@ -156,7 +156,7 @@ impl<T: Transport + Send + Sync + 'static> TcpTunnel for TcpTunnelImpl<T> {
 /// Create a dispatcher for TcpTunnelImpl.
 ///
 /// This is used to integrate the tunnel service with RpcSession's dispatcher.
-pub fn create_tunnel_dispatcher<T: Transport + Send + Sync + 'static>(
+pub fn create_tunnel_dispatcher<T: TransportHandle<SendPayload = Vec<u8>>>(
     service: Arc<TcpTunnelImpl<T>>,
 ) -> impl Fn(
     u32,
@@ -176,7 +176,7 @@ pub fn create_tunnel_dispatcher<T: Transport + Send + Sync + 'static>(
 }
 
 // Need to implement Clone for TcpTunnelImpl to use with the server
-impl<T: Transport + Send + Sync + 'static> Clone for TcpTunnelImpl<T> {
+impl<T: TransportHandle<SendPayload = Vec<u8>>> Clone for TcpTunnelImpl<T> {
     fn clone(&self) -> Self {
         Self {
             session: self.session.clone(),

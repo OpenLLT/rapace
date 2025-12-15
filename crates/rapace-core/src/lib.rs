@@ -4,7 +4,7 @@
 //! - Frame descriptors ([`MsgDescHot`], [`MsgDescCold`])
 //! - Frame types ([`Frame`], [`RecvFrame`])
 //! - Message header ([`MsgHeader`])
-//! - Transport traits ([`Transport`], [`DynTransport`])
+//! - Transport handle trait ([`TransportHandle`])
 //! - Encoding traits ([`EncodeCtx`], [`DecodeCtx`])
 //! - Error codes and flags ([`ErrorCode`], [`FrameFlags`], [`Encoding`])
 //! - Control payloads ([`ControlPayload`])
@@ -23,7 +23,6 @@ mod header;
 mod limits;
 mod session;
 mod streaming;
-mod transport;
 mod validation;
 
 pub use control::*;
@@ -37,7 +36,6 @@ pub use header::*;
 pub use limits::*;
 pub use session::*;
 pub use streaming::*;
-pub use transport::*;
 pub use validation::*;
 
 // Re-export StreamExt for use by macro-generated streaming clients

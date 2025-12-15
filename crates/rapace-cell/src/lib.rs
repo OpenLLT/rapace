@@ -367,8 +367,8 @@ async fn setup_cell(
     let shm_session = ShmSession::open_file(&shm_path, config)
         .map_err(|e| CellError::ShmOpen(format!("{:?}", e)))?;
 
-    // Create SHM transport
-    let transport = Arc::new(ShmTransport::new(shm_session));
+    // Create SHM transport (implements TransportHandle directly, has internal Arc)
+    let transport = ShmTransport::new(shm_session);
 
     // Create RPC session with cell channel start (even IDs)
     let session = Arc::new(RpcSession::with_channel_start(
@@ -544,7 +544,7 @@ pub trait RpcSessionExt<T> {
 
 impl<T> RpcSessionExt<T> for RpcSession<T>
 where
-    T: rapace::Transport + 'static,
+    T: rapace::TransportHandle<SendPayload = Vec<u8>>,
 {
     fn set_service<S>(&self, service: S)
     where

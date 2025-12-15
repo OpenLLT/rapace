@@ -7,7 +7,7 @@
 
 use std::sync::Arc;
 
-use rapace::{RpcSession, Transport};
+use rapace::{RpcSession, TransportHandle};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
@@ -20,12 +20,12 @@ pub const CHUNK_SIZE: usize = 4096;
 /// Host-side tunnel handler.
 ///
 /// Manages the connection between browser and plugin through rapace tunnels.
-pub struct TunnelHost<T: Transport + Send + Sync + 'static> {
+pub struct TunnelHost<T: TransportHandle<SendPayload = Vec<u8>>> {
     client: TcpTunnelClient<T>,
     metrics: Arc<GlobalTunnelMetrics>,
 }
 
-impl<T: Transport + Send + Sync + 'static> TunnelHost<T> {
+impl<T: TransportHandle<SendPayload = Vec<u8>>> TunnelHost<T> {
     pub fn new(session: Arc<RpcSession<T>>) -> Self {
         let client = TcpTunnelClient::new(session);
         Self {
@@ -131,7 +131,7 @@ impl<T: Transport + Send + Sync + 'static> TunnelHost<T> {
 }
 
 /// Run the host server that accepts browser connections and tunnels them to the plugin.
-pub async fn run_host_server<T: Transport + Send + Sync + 'static>(
+pub async fn run_host_server<T: TransportHandle<SendPayload = Vec<u8>>>(
     host: Arc<TunnelHost<T>>,
     listen_port: u16,
 ) -> std::io::Result<()> {

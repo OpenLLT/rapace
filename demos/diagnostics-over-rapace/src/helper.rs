@@ -17,11 +17,10 @@
 //! diagnostics-plugin-helper --transport=shm --addr=/tmp/rapace-diag.shm
 //! ```
 
-use std::sync::Arc;
 use std::time::Duration;
 
 use rapace::{
-    Transport,
+    TransportHandle,
     transport::{
         StreamTransport,
         shm::{ShmSession, ShmSessionConfig, ShmTransport},
@@ -133,11 +132,10 @@ async fn accept_inherited_stream() -> Option<TcpStream> {
 
 async fn run_plugin_stream<S: AsyncRead + AsyncWrite + Send + Sync + 'static>(stream: S) {
     let transport: StreamTransport<ReadHalf<S>, WriteHalf<S>> = StreamTransport::new(stream);
-    let transport = Arc::new(transport);
     run_plugin(transport).await;
 }
 
-async fn run_plugin<T: Transport + Send + Sync + 'static>(transport: Arc<T>) {
+async fn run_plugin<T: TransportHandle<SendPayload = Vec<u8>>>(transport: T) {
     eprintln!("[diagnostics-plugin] Service ready, waiting for requests...");
 
     // Use DiagnosticsServer::serve() which handles the frame loop
@@ -224,7 +222,7 @@ async fn main() {
             eprintln!("[diagnostics-plugin] Opening SHM file: {}", addr);
             let session = ShmSession::open_file(addr, ShmSessionConfig::default())
                 .expect("failed to open SHM file");
-            let transport = Arc::new(ShmTransport::new(session));
+            let transport = ShmTransport::new(session);
             eprintln!("[diagnostics-plugin] SHM mapped!");
             run_plugin(transport).await;
         }

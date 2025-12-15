@@ -117,7 +117,10 @@ impl TransportHandle for WebSocketHandle {
     type SendPayload = Vec<u8>;
     type RecvPayload = Vec<u8>;
 
-    async fn send_frame(&self, frame: SendFrame<Self::SendPayload>) -> Result<(), TransportError> {
+    async fn send_frame(
+        &self,
+        frame: impl Into<SendFrame<Self::SendPayload>>,
+    ) -> Result<(), TransportError> {
         // Fast-fail if driver is in terminal state
         match &*self.state_rx.borrow() {
             DriverState::Closed => return Err(TransportError::Closed),

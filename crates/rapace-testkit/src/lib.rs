@@ -32,7 +32,7 @@ use std::sync::Arc;
 use rapace::session::Session;
 use rapace_core::{
     CancelReason, ControlPayload, ErrorCode, Frame, FrameFlags, MsgDescHot, NO_DEADLINE, RpcError,
-    RpcSession, Transport, control_method,
+    RpcSession, TransportHandle, control_method,
 };
 
 pub mod bidirectional;
@@ -82,7 +82,7 @@ impl From<rapace_core::TransportError> for TestError {
 /// pairs of transports for testing.
 pub trait TransportFactory: Send + Sync + 'static {
     /// The transport type being tested.
-    type Transport: Transport + Send + Sync + 'static;
+    type Transport: TransportHandle<SendPayload = Vec<u8>> + Send + Sync + 'static;
 
     /// Create a connected pair of transports.
     ///
@@ -160,8 +160,7 @@ pub async fn run_unary_happy_path<F: TransportFactory>() {
 
 async fn run_unary_happy_path_inner<F: TransportFactory>() -> Result<(), TestError> {
     let (client_transport, server_transport) = F::connect_pair().await?;
-    let client_transport = Arc::new(client_transport);
-    let server_transport = Arc::new(server_transport);
+    // Transports are Clone (have internal Arc), no need to wrap in Arc
 
     let server = AdderServer::new(AdderImpl);
 
@@ -176,7 +175,7 @@ async fn run_unary_happy_path_inner<F: TransportFactory>() -> Result<(), TestErr
                 .map_err(TestError::Rpc)?;
             // Set channel_id on response to match request
             response.desc.channel_id = request.desc.channel_id;
-            server_transport.send_frame(&response).await?;
+            server_transport.send_frame((&response).into()).await?;
             Ok::<_, TestError>(())
         }
     });
@@ -218,8 +217,7 @@ pub async fn run_unary_multiple_calls<F: TransportFactory>() {
 
 async fn run_unary_multiple_calls_inner<F: TransportFactory>() -> Result<(), TestError> {
     let (client_transport, server_transport) = F::connect_pair().await?;
-    let client_transport = Arc::new(client_transport);
-    let server_transport = Arc::new(server_transport);
+    // Transports are Clone (have internal Arc), no need to wrap in Arc
 
     let server = AdderServer::new(AdderImpl);
 
@@ -235,7 +233,7 @@ async fn run_unary_multiple_calls_inner<F: TransportFactory>() -> Result<(), Tes
                     .map_err(TestError::Rpc)?;
                 // Set channel_id on response to match request
                 response.desc.channel_id = request.desc.channel_id;
-                server_transport.send_frame(&response).await?;
+                server_transport.send_frame((&response).into()).await?;
             }
             Ok::<_, TestError>(())
         }
@@ -286,8 +284,7 @@ pub async fn run_error_response<F: TransportFactory>() {
 
 async fn run_error_response_inner<F: TransportFactory>() -> Result<(), TestError> {
     let (client_transport, server_transport) = F::connect_pair().await?;
-    let client_transport = Arc::new(client_transport);
-    let server_transport = Arc::new(server_transport);
+    // Transports are Clone (have internal Arc), no need to wrap in Arc
 
     // Spawn server that returns an error
     let server_handle = tokio::spawn({
@@ -311,7 +308,7 @@ async fn run_error_response_inner<F: TransportFactory>() -> Result<(), TestError
             payload.extend_from_slice(message.as_bytes());
 
             let frame = Frame::with_payload(desc, payload);
-            server_transport.send_frame(&frame).await?;
+            server_transport.send_frame((&frame).into()).await?;
 
             Ok::<_, TestError>(())
         }
@@ -379,8 +376,7 @@ pub async fn run_ping_pong<F: TransportFactory>() {
 
 async fn run_ping_pong_inner<F: TransportFactory>() -> Result<(), TestError> {
     let (client_transport, server_transport) = F::connect_pair().await?;
-    let client_transport = Arc::new(client_transport);
-    let server_transport = Arc::new(server_transport);
+    // Transports are Clone (have internal Arc), no need to wrap in Arc
 
     // Server responds to PING with PONG
     let server_handle = tokio::spawn({
@@ -413,7 +409,7 @@ async fn run_ping_pong_inner<F: TransportFactory>() -> Result<(), TestError> {
 
             let frame = Frame::with_inline_payload(desc, &ping_payload)
                 .expect("pong payload should fit inline");
-            server_transport.send_frame(&frame).await?;
+            server_transport.send_frame((&frame).into()).await?;
 
             Ok::<_, TestError>(())
         }
@@ -430,7 +426,7 @@ async fn run_ping_pong_inner<F: TransportFactory>() -> Result<(), TestError> {
 
     let frame =
         Frame::with_inline_payload(desc, &ping_data).expect("ping payload should fit inline");
-    client_transport.send_frame(&frame).await?;
+    client_transport.send_frame((&frame).into()).await?;
 
     // Receive PONG
     let pong = client_transport.recv_frame().await?;
@@ -480,8 +476,7 @@ pub async fn run_deadline_success<F: TransportFactory>() {
 
 async fn run_deadline_success_inner<F: TransportFactory>() -> Result<(), TestError> {
     let (client_transport, server_transport) = F::connect_pair().await?;
-    let client_transport = Arc::new(client_transport);
-    let server_transport = Arc::new(server_transport);
+    // Transports are Clone (have internal Arc), no need to wrap in Arc
 
     let server = AdderServer::new(AdderImpl);
 
@@ -509,7 +504,7 @@ async fn run_deadline_success_inner<F: TransportFactory>() -> Result<(), TestErr
                     payload.extend_from_slice(message.as_bytes());
 
                     let frame = Frame::with_payload(desc, payload);
-                    server_transport.send_frame(&frame).await?;
+                    server_transport.send_frame((&frame).into()).await?;
                     return Ok(());
                 }
             }
@@ -521,7 +516,7 @@ async fn run_deadline_success_inner<F: TransportFactory>() -> Result<(), TestErr
                 .map_err(TestError::Rpc)?;
             // Set channel_id on response to match request
             response.desc.channel_id = request.desc.channel_id;
-            server_transport.send_frame(&response).await?;
+            server_transport.send_frame((&response).into()).await?;
             Ok::<_, TestError>(())
         }
     });
@@ -564,8 +559,7 @@ pub async fn run_deadline_exceeded<F: TransportFactory>() {
 
 async fn run_deadline_exceeded_inner<F: TransportFactory>() -> Result<(), TestError> {
     let (client_transport, server_transport) = F::connect_pair().await?;
-    let client_transport = Arc::new(client_transport);
-    let server_transport = Arc::new(server_transport);
+    // Transports are Clone (have internal Arc), no need to wrap in Arc
 
     // Initialize the time base and capture current time
     // This ensures now_ns() is properly initialized before we set an expired deadline
@@ -599,7 +593,7 @@ async fn run_deadline_exceeded_inner<F: TransportFactory>() -> Result<(), TestEr
                     payload.extend_from_slice(message.as_bytes());
 
                     let frame = Frame::with_payload(desc, payload);
-                    server_transport.send_frame(&frame).await?;
+                    server_transport.send_frame((&frame).into()).await?;
                     return Ok(());
                 }
             }
@@ -626,7 +620,7 @@ async fn run_deadline_exceeded_inner<F: TransportFactory>() -> Result<(), TestEr
         Frame::with_payload(desc, request_payload)
     };
 
-    client_transport.send_frame(&frame).await?;
+    client_transport.send_frame((&frame).into()).await?;
 
     // Receive error response
     let response = client_transport.recv_frame().await?;
@@ -677,8 +671,7 @@ pub async fn run_cancellation<F: TransportFactory>() {
 
 async fn run_cancellation_inner<F: TransportFactory>() -> Result<(), TestError> {
     let (client_transport, server_transport) = F::connect_pair().await?;
-    let client_transport = Arc::new(client_transport);
-    let server_transport = Arc::new(server_transport);
+    // Transports are Clone (have internal Arc), no need to wrap in Arc
 
     let channel_to_cancel: u32 = 42;
 
@@ -755,7 +748,7 @@ async fn run_cancellation_inner<F: TransportFactory>() -> Result<(), TestError> 
     desc.flags = FrameFlags::DATA;
 
     let frame = Frame::with_inline_payload(desc, &request_payload).expect("should fit inline");
-    client_transport.send_frame(&frame).await?;
+    client_transport.send_frame((&frame).into()).await?;
 
     // Client sends cancel control frame
     let cancel_payload = ControlPayload::CancelChannel {
@@ -772,7 +765,7 @@ async fn run_cancellation_inner<F: TransportFactory>() -> Result<(), TestError> 
 
     let cancel_frame =
         Frame::with_inline_payload(cancel_desc, &cancel_bytes).expect("should fit inline");
-    client_transport.send_frame(&cancel_frame).await?;
+    client_transport.send_frame((&cancel_frame).into()).await?;
 
     server_handle
         .await
@@ -798,8 +791,7 @@ pub async fn run_credit_grant<F: TransportFactory>() {
 
 async fn run_credit_grant_inner<F: TransportFactory>() -> Result<(), TestError> {
     let (client_transport, server_transport) = F::connect_pair().await?;
-    let client_transport = Arc::new(client_transport);
-    let server_transport = Arc::new(server_transport);
+    // Transports are Clone (have internal Arc), no need to wrap in Arc
 
     let channel_id: u32 = 1;
     let credit_amount: u32 = 65536;
@@ -823,7 +815,7 @@ async fn run_credit_grant_inner<F: TransportFactory>() -> Result<(), TestError> 
             desc.credit_grant = credit_amount; // Also in descriptor for fast path
 
             let frame = Frame::with_inline_payload(desc, &grant_bytes).expect("should fit inline");
-            server_transport.send_frame(&frame).await?;
+            server_transport.send_frame((&frame).into()).await?;
 
             Ok::<_, TestError>(())
         }
@@ -910,9 +902,8 @@ async fn run_session_credit_exhaustion_inner<F: TransportFactory>() -> Result<()
     use rapace::session::DEFAULT_INITIAL_CREDITS;
 
     let (client_transport, _server_transport) = F::connect_pair().await?;
-    let client_transport = Arc::new(client_transport);
 
-    // Wrap transport in Session
+    // Wrap transport in Session (transports are Clone, have internal Arc)
     let session = Session::new(client_transport);
 
     // Create a data frame that exceeds available credits
@@ -929,7 +920,7 @@ async fn run_session_credit_exhaustion_inner<F: TransportFactory>() -> Result<()
     let frame = Frame::with_payload(desc, large_payload);
 
     // Should fail with ResourceExhausted
-    let result = session.send_frame(&frame).await;
+    let result = session.send_frame((&frame).into()).await;
 
     match result {
         Err(RpcError::Status {
@@ -959,8 +950,7 @@ pub async fn run_session_cancelled_channel_drop<F: TransportFactory>() {
 
 async fn run_session_cancelled_channel_drop_inner<F: TransportFactory>() -> Result<(), TestError> {
     let (client_transport, server_transport) = F::connect_pair().await?;
-    let client_transport = Arc::new(client_transport);
-    let server_transport = Arc::new(server_transport);
+    // Transports are Clone (have internal Arc), no need to wrap in Arc
 
     let session = Session::new(client_transport);
     let channel_id = 42u32;
@@ -983,7 +973,7 @@ async fn run_session_cancelled_channel_drop_inner<F: TransportFactory>() -> Resu
     let frame = Frame::with_inline_payload(desc, b"test").expect("should fit");
 
     // Should succeed (frame is silently dropped, not sent)
-    session.send_frame(&frame).await?;
+    session.send_frame((&frame).into()).await?;
 
     // The server should not receive anything - let's verify by sending on another channel
     // and checking only that frame arrives
@@ -994,7 +984,7 @@ async fn run_session_cancelled_channel_drop_inner<F: TransportFactory>() -> Resu
     desc2.flags = FrameFlags::DATA | FrameFlags::EOS;
 
     let frame2 = Frame::with_inline_payload(desc2, b"marker").expect("should fit");
-    session.transport().send_frame(&frame2).await?;
+    session.transport().send_frame((&frame2).into()).await?;
 
     // Server receives only the marker frame
     let received = server_transport.recv_frame().await?;
@@ -1021,8 +1011,7 @@ pub async fn run_session_cancel_control_frame<F: TransportFactory>() {
 
 async fn run_session_cancel_control_frame_inner<F: TransportFactory>() -> Result<(), TestError> {
     let (client_transport, server_transport) = F::connect_pair().await?;
-    let client_transport = Arc::new(client_transport);
-    let server_transport = Arc::new(server_transport);
+    // Transports are Clone (have internal Arc), no need to wrap in Arc
 
     let session = Session::new(server_transport);
     let channel_to_cancel = 42u32;
@@ -1041,7 +1030,7 @@ async fn run_session_cancel_control_frame_inner<F: TransportFactory>() -> Result
     cancel_desc.flags = FrameFlags::CONTROL | FrameFlags::EOS;
 
     let cancel_frame = Frame::with_inline_payload(cancel_desc, &cancel_bytes).expect("should fit");
-    client_transport.send_frame(&cancel_frame).await?;
+    client_transport.send_frame((&cancel_frame).into()).await?;
 
     // Client sends a data frame on the cancelled channel
     let mut data_desc = MsgDescHot::new();
@@ -1051,7 +1040,7 @@ async fn run_session_cancel_control_frame_inner<F: TransportFactory>() -> Result
     data_desc.flags = FrameFlags::DATA | FrameFlags::EOS;
 
     let data_frame = Frame::with_inline_payload(data_desc, b"dropped").expect("should fit");
-    client_transport.send_frame(&data_frame).await?;
+    client_transport.send_frame((&data_frame).into()).await?;
 
     // Client sends a data frame on a different channel
     let mut marker_desc = MsgDescHot::new();
@@ -1061,7 +1050,7 @@ async fn run_session_cancel_control_frame_inner<F: TransportFactory>() -> Result
     marker_desc.flags = FrameFlags::DATA | FrameFlags::EOS;
 
     let marker_frame = Frame::with_inline_payload(marker_desc, b"marker").expect("should fit");
-    client_transport.send_frame(&marker_frame).await?;
+    client_transport.send_frame((&marker_frame).into()).await?;
 
     // Session receives control frame first (processes it internally)
     let frame1 = session.recv_frame().await?;
@@ -1106,8 +1095,7 @@ async fn run_session_grant_credits_control_frame_inner<F: TransportFactory>()
     use rapace::session::DEFAULT_INITIAL_CREDITS;
 
     let (client_transport, server_transport) = F::connect_pair().await?;
-    let client_transport = Arc::new(client_transport);
-    let server_transport = Arc::new(server_transport);
+    // Transports are Clone (have internal Arc), no need to wrap in Arc
 
     let session = Session::new(client_transport);
     let channel_id = 1u32;
@@ -1136,7 +1124,7 @@ async fn run_session_grant_credits_control_frame_inner<F: TransportFactory>()
     grant_desc.credit_grant = 10000;
 
     let grant_frame = Frame::with_inline_payload(grant_desc, &grant_bytes).expect("should fit");
-    server_transport.send_frame(&grant_frame).await?;
+    server_transport.send_frame((&grant_frame).into()).await?;
 
     // Session receives and processes the control frame
     let frame = session.recv_frame().await?;
@@ -1167,8 +1155,8 @@ pub async fn run_session_deadline_check<F: TransportFactory>() {
 
 async fn run_session_deadline_check_inner<F: TransportFactory>() -> Result<(), TestError> {
     let (client_transport, _server_transport) = F::connect_pair().await?;
-    let client_transport = Arc::new(client_transport);
 
+    // Transports are Clone (have internal Arc), no need to wrap
     let session = Session::new(client_transport);
 
     // Test 1: No deadline should not be exceeded
@@ -1227,8 +1215,7 @@ pub async fn run_server_streaming_happy_path<F: TransportFactory>() {
 
 async fn run_server_streaming_happy_path_inner<F: TransportFactory>() -> Result<(), TestError> {
     let (client_transport, server_transport) = F::connect_pair().await?;
-    let client_transport = Arc::new(client_transport);
-    let server_transport = Arc::new(server_transport);
+    // Transports are Clone (have internal Arc), no need to wrap in Arc
 
     let client_session = Session::new(client_transport.clone());
     let server_session = Session::new(server_transport.clone());
@@ -1269,7 +1256,7 @@ async fn run_server_streaming_happy_path_inner<F: TransportFactory>() -> Result<
                 let item_bytes = facet_postcard::to_vec(&i).unwrap();
                 let frame =
                     Frame::with_inline_payload(desc, &item_bytes).expect("item should fit inline");
-                server_session.send_frame(&frame).await?;
+                server_session.send_frame((&frame).into()).await?;
             }
 
             // Send final EOS frame (empty payload)
@@ -1297,7 +1284,7 @@ async fn run_server_streaming_happy_path_inner<F: TransportFactory>() -> Result<
     desc.flags = FrameFlags::DATA | FrameFlags::EOS; // Client sends request + EOS
 
     let frame = Frame::with_inline_payload(desc, &request_bytes).expect("should fit inline");
-    client_session.send_frame(&frame).await?;
+    client_session.send_frame((&frame).into()).await?;
 
     // After sending EOS, client channel should be HalfClosedLocal
     let state = client_session.get_lifecycle(channel_id);
@@ -1371,8 +1358,7 @@ pub async fn run_client_streaming_happy_path<F: TransportFactory>() {
 
 async fn run_client_streaming_happy_path_inner<F: TransportFactory>() -> Result<(), TestError> {
     let (client_transport, server_transport) = F::connect_pair().await?;
-    let client_transport = Arc::new(client_transport);
-    let server_transport = Arc::new(server_transport);
+    // Transports are Clone (have internal Arc), no need to wrap in Arc
 
     let client_session = Session::new(client_transport.clone());
     let server_session = Session::new(server_transport.clone());
@@ -1430,7 +1416,7 @@ async fn run_client_streaming_happy_path_inner<F: TransportFactory>() -> Result<
             let response_bytes = facet_postcard::to_vec(&sum).unwrap();
             let frame =
                 Frame::with_inline_payload(desc, &response_bytes).expect("should fit inline");
-            server_session.send_frame(&frame).await?;
+            server_session.send_frame((&frame).into()).await?;
 
             Ok::<_, TestError>(())
         }
@@ -1452,7 +1438,7 @@ async fn run_client_streaming_happy_path_inner<F: TransportFactory>() -> Result<
 
         let item_bytes = facet_postcard::to_vec(&item).unwrap();
         let frame = Frame::with_inline_payload(desc, &item_bytes).expect("should fit inline");
-        client_session.send_frame(&frame).await?;
+        client_session.send_frame((&frame).into()).await?;
     }
 
     // Receive response
@@ -1510,8 +1496,7 @@ pub async fn run_bidirectional_streaming<F: TransportFactory>() {
 
 async fn run_bidirectional_streaming_inner<F: TransportFactory>() -> Result<(), TestError> {
     let (client_transport, server_transport) = F::connect_pair().await?;
-    let client_transport = Arc::new(client_transport);
-    let server_transport = Arc::new(server_transport);
+    // Transports are Clone (have internal Arc), no need to wrap in Arc
 
     let client_session = Session::new(client_transport.clone());
     let server_session = Session::new(server_transport.clone());
@@ -1540,7 +1525,7 @@ async fn run_bidirectional_streaming_inner<F: TransportFactory>() -> Result<(), 
                 let item_bytes = facet_postcard::to_vec(item).unwrap();
                 let frame =
                     Frame::with_inline_payload(desc, &item_bytes).expect("should fit inline");
-                server_session.send_frame(&frame).await?;
+                server_session.send_frame((&frame).into()).await?;
             }
 
             // Receive items until client sends EOS
@@ -1592,7 +1577,7 @@ async fn run_bidirectional_streaming_inner<F: TransportFactory>() -> Result<(), 
 
         let item_bytes = facet_postcard::to_vec(item).unwrap();
         let frame = Frame::with_inline_payload(desc, &item_bytes).expect("should fit inline");
-        client_session.send_frame(&frame).await?;
+        client_session.send_frame((&frame).into()).await?;
     }
 
     // Receive server items until EOS
@@ -1672,8 +1657,7 @@ async fn run_macro_server_streaming_inner<F: TransportFactory>() -> Result<(), T
     use futures::StreamExt;
 
     let (client_transport, server_transport) = F::connect_pair().await?;
-    let client_transport = Arc::new(client_transport);
-    let server_transport = Arc::new(server_transport);
+    // Transports are Clone (have internal Arc), no need to wrap in Arc
 
     let server = RangeServiceServer::new(RangeServiceImpl);
 
@@ -1735,8 +1719,7 @@ async fn run_macro_server_streaming_inner<F: TransportFactory>() -> Result<(), T
 
 async fn run_streaming_cancellation_inner<F: TransportFactory>() -> Result<(), TestError> {
     let (client_transport, server_transport) = F::connect_pair().await?;
-    let client_transport = Arc::new(client_transport);
-    let server_transport = Arc::new(server_transport);
+    // Transports are Clone (have internal Arc), no need to wrap in Arc
 
     let client_session = Session::new(client_transport.clone());
     let server_session = Session::new(server_transport.clone());
@@ -1758,7 +1741,7 @@ async fn run_streaming_cancellation_inner<F: TransportFactory>() -> Result<(), T
                 let item_bytes = facet_postcard::to_vec(&i).unwrap();
                 let frame =
                     Frame::with_inline_payload(desc, &item_bytes).expect("should fit inline");
-                server_session.send_frame(&frame).await?;
+                server_session.send_frame((&frame).into()).await?;
             }
 
             // Send cancel control frame
@@ -1776,7 +1759,10 @@ async fn run_streaming_cancellation_inner<F: TransportFactory>() -> Result<(), T
 
             let cancel_frame =
                 Frame::with_inline_payload(cancel_desc, &cancel_bytes).expect("should fit inline");
-            server_session.transport().send_frame(&cancel_frame).await?;
+            server_session
+                .transport()
+                .send_frame((&cancel_frame).into())
+                .await?;
 
             // Send marker on different channel (to signal end of test)
             let mut marker_desc = MsgDescHot::new();
@@ -1787,7 +1773,10 @@ async fn run_streaming_cancellation_inner<F: TransportFactory>() -> Result<(), T
 
             let marker_frame =
                 Frame::with_inline_payload(marker_desc, b"done").expect("should fit inline");
-            server_session.transport().send_frame(&marker_frame).await?;
+            server_session
+                .transport()
+                .send_frame((&marker_frame).into())
+                .await?;
 
             Ok::<_, TestError>(())
         }
@@ -1899,8 +1888,7 @@ pub async fn run_large_blob_echo<F: TransportFactory>() {
 
 async fn run_large_blob_echo_inner<F: TransportFactory>() -> Result<(), TestError> {
     let (client_transport, server_transport) = F::connect_pair().await?;
-    let client_transport = Arc::new(client_transport);
-    let server_transport = Arc::new(server_transport);
+    // Transports are Clone (have internal Arc), no need to wrap in Arc
 
     let server = LargeBlobServiceServer::new(LargeBlobServiceImpl);
 
@@ -1915,7 +1903,7 @@ async fn run_large_blob_echo_inner<F: TransportFactory>() -> Result<(), TestErro
                 .map_err(TestError::Rpc)?;
             // Set channel_id on response to match request
             response.desc.channel_id = request.desc.channel_id;
-            server_transport.send_frame(&response).await?;
+            server_transport.send_frame((&response).into()).await?;
             Ok::<_, TestError>(())
         }
     });
@@ -1959,8 +1947,7 @@ pub async fn run_large_blob_transform<F: TransportFactory>() {
 
 async fn run_large_blob_transform_inner<F: TransportFactory>() -> Result<(), TestError> {
     let (client_transport, server_transport) = F::connect_pair().await?;
-    let client_transport = Arc::new(client_transport);
-    let server_transport = Arc::new(server_transport);
+    // Transports are Clone (have internal Arc), no need to wrap in Arc
 
     let server = LargeBlobServiceServer::new(LargeBlobServiceImpl);
 
@@ -1975,7 +1962,7 @@ async fn run_large_blob_transform_inner<F: TransportFactory>() -> Result<(), Tes
                 .map_err(TestError::Rpc)?;
             // Set channel_id on response to match request
             response.desc.channel_id = request.desc.channel_id;
-            server_transport.send_frame(&response).await?;
+            server_transport.send_frame((&response).into()).await?;
             Ok::<_, TestError>(())
         }
     });
@@ -2018,8 +2005,7 @@ pub async fn run_large_blob_checksum<F: TransportFactory>() {
 
 async fn run_large_blob_checksum_inner<F: TransportFactory>() -> Result<(), TestError> {
     let (client_transport, server_transport) = F::connect_pair().await?;
-    let client_transport = Arc::new(client_transport);
-    let server_transport = Arc::new(server_transport);
+    // Transports are Clone (have internal Arc), no need to wrap in Arc
 
     let server = LargeBlobServiceServer::new(LargeBlobServiceImpl);
 
@@ -2044,7 +2030,7 @@ async fn run_large_blob_checksum_inner<F: TransportFactory>() -> Result<(), Test
                     .map_err(TestError::Rpc)?;
                 // Set channel_id on response to match request
                 response.desc.channel_id = request.desc.channel_id;
-                server_transport.send_frame(&response).await?;
+                server_transport.send_frame((&response).into()).await?;
                 Ok::<_, TestError>(())
             }
         });
@@ -2209,7 +2195,8 @@ mod registry_tests {
 
         // Create a registry-aware client and verify it uses the correct IDs
         let (client_transport, _server_transport) = InProcTransport::pair();
-        let client_session = RpcSession::new(Arc::new(client_transport));
+        // Transport has internal Arc, no need to wrap
+        let client_session = RpcSession::new(client_transport);
         let client = AdderRegistryClient::new(Arc::new(client_session), &registry);
 
         // The client should have the correct method ID stored

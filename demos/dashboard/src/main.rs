@@ -754,7 +754,8 @@ async fn run_websocket_server(explorer: Arc<ExplorerImpl>) {
                 }
             };
 
-            let transport = Arc::new(WebSocketTransport::new(ws_stream));
+            // WebSocketTransport has internal Arc, no need to wrap
+            let transport = WebSocketTransport::new(ws_stream);
             let server = ExplorerServer::new(explorer.as_ref().clone());
 
             if let Err(e) = server.serve(transport).await {

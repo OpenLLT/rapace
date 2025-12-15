@@ -2,11 +2,11 @@
 //!
 //! This example demonstrates HTTP request handling where:
 //! - The **host** runs a lightweight HTTP server (hyper)
-//! - The **plugin** owns the axum router with all HTTP logic
+//! - The **cell** owns the axum router with all HTTP logic
 //! - Requests flow: client → hyper → rapace RPC → axum → response
 //!
 //! This pattern keeps the host process light (no axum/tower dependencies)
-//! while the plugin handles all HTTP routing and business logic.
+//! while the cell handles all HTTP routing and business logic.
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -30,27 +30,25 @@ async fn main() {
     println!("=== HTTP over Rapace Demo ===\n");
 
     // Create a transport pair (in-memory for demo)
-    let (host_transport, plugin_transport) = InProcTransport::pair();
-    let host_transport = Arc::new(host_transport);
-    let plugin_transport = Arc::new(plugin_transport);
+    let (host_transport, cell_transport) = InProcTransport::pair();
 
-    // ========== PLUGIN SIDE ==========
-    // Create RpcSession for the plugin (uses even channel IDs: 2, 4, 6, ...)
-    let plugin_session = Arc::new(RpcSession::with_channel_start(plugin_transport.clone(), 2));
+    // ========== CELL SIDE ==========
+    // Create RpcSession for the cell (uses even channel IDs: 2, 4, 6, ...)
+    let cell_session = Arc::new(RpcSession::with_channel_start(cell_transport, 2));
 
     // Create the axum-based HTTP service with demo routes
     let http_service = AxumHttpService::with_demo_routes();
 
     // Set dispatcher for HttpService
-    plugin_session.set_dispatcher(create_http_service_dispatcher(http_service));
+    cell_session.set_dispatcher(create_http_service_dispatcher(http_service));
 
-    // Spawn the plugin's demux loop
-    let plugin_session_clone = plugin_session.clone();
-    let _plugin_handle = tokio::spawn(async move { plugin_session_clone.run().await });
+    // Spawn the cell's demux loop
+    let cell_session_clone = cell_session.clone();
+    let _cell_handle = tokio::spawn(async move { cell_session_clone.run().await });
 
     // ========== HOST SIDE ==========
     // Create RpcSession for the host (uses odd channel IDs: 1, 3, 5, ...)
-    let host_session = Arc::new(RpcSession::with_channel_start(host_transport.clone(), 1));
+    let host_session = Arc::new(RpcSession::with_channel_start(host_transport, 1));
 
     // Spawn the host's demux loop
     let host_session_clone = host_session.clone();

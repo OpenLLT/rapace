@@ -32,7 +32,7 @@ pub trait TransportHandle: Send + Sync + Clone + 'static {
     /// Send a frame. Awaits if backpressure is applied.
     fn send_frame(
         &self,
-        frame: SendFrame<Self::SendPayload>,
+        frame: impl Into<SendFrame<Self::SendPayload>> + Send + 'static,
     ) -> impl Future<Output = Result<(), TransportError>> + Send;
 
     /// Receive a frame.
@@ -102,6 +102,36 @@ impl SendFrame<Vec<u8>> {
             desc,
             payload: None,
         })
+    }
+}
+
+/// Convert an owned Frame to a SendFrame.
+impl From<crate::Frame> for SendFrame<Vec<u8>> {
+    fn from(frame: crate::Frame) -> Self {
+        Self {
+            desc: frame.desc,
+            payload: frame.payload,
+        }
+    }
+}
+
+/// Convert a borrowed Frame to a SendFrame (clones payload if present).
+impl From<&crate::Frame> for SendFrame<Vec<u8>> {
+    fn from(frame: &crate::Frame) -> Self {
+        Self {
+            desc: frame.desc,
+            payload: frame.payload.clone(),
+        }
+    }
+}
+
+/// Convert a SendFrame back to a Frame.
+impl From<SendFrame<Vec<u8>>> for crate::Frame {
+    fn from(send_frame: SendFrame<Vec<u8>>) -> Self {
+        Self {
+            desc: send_frame.desc,
+            payload: send_frame.payload,
+        }
     }
 }
 

@@ -5,8 +5,8 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use rapace::RpcSession;
 use rapace::transport::InProcTransport;
+use rapace::{RpcSession, TransportHandle};
 
 use rapace_http_tunnel::{
     GlobalTunnelMetrics, TcpTunnelImpl, TunnelHost, create_tunnel_dispatcher, run_http_server,
@@ -47,7 +47,7 @@ async fn start_plugin<T: rapace::Transport + Send + Sync + 'static>(
 }
 
 /// Helper to start the host side (tunnel client).
-async fn start_host<T: rapace::Transport + Send + Sync + 'static>(
+async fn start_host<T: TransportHandle + Send + Sync + 'static>(
     session: Arc<RpcSession<T>>,
 ) -> Arc<TunnelHost<T>> {
     // Spawn demux loop

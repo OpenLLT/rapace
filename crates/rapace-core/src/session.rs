@@ -84,8 +84,8 @@ use parking_lot::Mutex;
 use tokio::sync::{mpsc, oneshot};
 
 use crate::{
-    ErrorCode, Frame, FrameFlags, INLINE_PAYLOAD_SIZE, MsgDescHot, RpcError, Transport,
-    TransportError,
+    ErrorCode, Frame, FrameFlags, INLINE_PAYLOAD_SIZE, MsgDescHot, RpcError, TransportError,
+    TransportHandle,
 };
 
 const DEFAULT_MAX_PENDING: usize = 8192;
@@ -137,8 +137,8 @@ pub type BoxedDispatcher = Box<
 /// Only `RpcSession::run()` calls `transport.recv_frame()`. No other code should
 /// touch `recv_frame` directly. This prevents the race condition where multiple
 /// callers compete for incoming frames.
-pub struct RpcSession<T: Transport> {
-    transport: Arc<T>,
+pub struct RpcSession<T: TransportHandle<SendPayload = Vec<u8>>> {
+    transport: T,
 
     /// Pending response waiters: channel_id -> oneshot sender.
     /// When a client sends a request, it registers a waiter here.
@@ -162,14 +162,14 @@ pub struct RpcSession<T: Transport> {
     next_channel_id: AtomicU32,
 }
 
-impl<T: Transport + Send + Sync + 'static> RpcSession<T> {
-    /// Create a new RPC session wrapping the given transport.
+impl<T: TransportHandle<SendPayload = Vec<u8>>> RpcSession<T> {
+    /// Create a new RPC session wrapping the given transport handle.
     ///
     /// The `start_channel_id` parameter allows different sessions to use different
     /// channel ID ranges, avoiding collisions in bidirectional RPC scenarios.
     /// - Odd IDs (1, 3, 5, ...): typically used by one side
     /// - Even IDs (2, 4, 6, ...): typically used by the other side
-    pub fn new(transport: Arc<T>) -> Self {
+    pub fn new(transport: T) -> Self {
         Self::with_channel_start(transport, 1)
     }
 
@@ -179,7 +179,7 @@ impl<T: Transport + Send + Sync + 'static> RpcSession<T> {
     /// For bidirectional RPC over a single transport pair:
     /// - Host session: start at 1 (uses odd channel IDs)
     /// - Plugin session: start at 2 (uses even channel IDs)
-    pub fn with_channel_start(transport: Arc<T>, start_channel_id: u32) -> Self {
+    pub fn with_channel_start(transport: T, start_channel_id: u32) -> Self {
         Self {
             transport,
             pending: Mutex::new(HashMap::new()),
@@ -193,6 +193,14 @@ impl<T: Transport + Send + Sync + 'static> RpcSession<T> {
     /// Get a reference to the underlying transport.
     pub fn transport(&self) -> &T {
         &self.transport
+    }
+
+    /// Close the underlying transport.
+    ///
+    /// This signals the transport to shut down. The `run()` loop will exit
+    /// once the transport is closed and all pending frames are processed.
+    pub fn close(&self) {
+        self.transport.close();
     }
 
     /// Get the next message ID.
@@ -383,7 +391,7 @@ impl<T: Transport + Send + Sync + 'static> RpcSession<T> {
         };
 
         self.transport
-            .send_frame(&frame)
+            .send_frame(frame)
             .await
             .map_err(RpcError::Transport)
     }
@@ -411,7 +419,7 @@ impl<T: Transport + Send + Sync + 'static> RpcSession<T> {
         let frame = Frame::with_inline_payload(desc, &[]).expect("empty payload should fit");
 
         self.transport
-            .send_frame(&frame)
+            .send_frame(frame)
             .await
             .map_err(RpcError::Transport)
     }
@@ -486,7 +494,7 @@ impl<T: Transport + Send + Sync + 'static> RpcSession<T> {
         );
 
         self.transport
-            .send_frame(&frame)
+            .send_frame(frame)
             .await
             .map_err(RpcError::Transport)?;
 
@@ -511,19 +519,19 @@ impl<T: Transport + Send + Sync + 'static> RpcSession<T> {
         method_id: u32,
         payload: Vec<u8>,
     ) -> Result<ReceivedFrame, RpcError> {
-        struct PendingGuard<'a, T: Transport> {
+        struct PendingGuard<'a, T: TransportHandle<SendPayload = Vec<u8>>> {
             session: &'a RpcSession<T>,
             channel_id: u32,
             active: bool,
         }
 
-        impl<'a, T: Transport> PendingGuard<'a, T> {
+        impl<'a, T: TransportHandle<SendPayload = Vec<u8>>> PendingGuard<'a, T> {
             fn disarm(&mut self) {
                 self.active = false;
             }
         }
 
-        impl<T: Transport> Drop for PendingGuard<'_, T> {
+        impl<T: TransportHandle<SendPayload = Vec<u8>>> Drop for PendingGuard<'_, T> {
             fn drop(&mut self) {
                 if !self.active {
                     return;
@@ -565,7 +573,7 @@ impl<T: Transport + Send + Sync + 'static> RpcSession<T> {
         };
 
         self.transport
-            .send_frame(&frame)
+            .send_frame(frame)
             .await
             .map_err(RpcError::Transport)?;
 
@@ -625,13 +633,13 @@ impl<T: Transport + Send + Sync + 'static> RpcSession<T> {
         };
 
         self.transport
-            .send_frame(&frame)
+            .send_frame(frame)
             .await
             .map_err(RpcError::Transport)
     }
 
     /// Send a response frame.
-    pub async fn send_response(&self, frame: &Frame) -> Result<(), RpcError> {
+    pub async fn send_response(&self, frame: Frame) -> Result<(), RpcError> {
         self.transport
             .send_frame(frame)
             .await
@@ -755,7 +763,7 @@ impl<T: Transport + Send + Sync + 'static> RpcSession<T> {
                         Ok(mut response) => {
                             // Set the channel_id on the response
                             response.desc.channel_id = channel_id;
-                            if let Err(e) = transport.send_frame(&response).await {
+                            if let Err(e) = transport.send_frame(response).await {
                                 tracing::warn!(
                                     channel_id,
                                     error = ?e,
@@ -791,7 +799,7 @@ impl<T: Transport + Send + Sync + 'static> RpcSession<T> {
                             err_bytes.extend_from_slice(message.as_bytes());
 
                             let frame = Frame::with_payload(desc, err_bytes);
-                            if let Err(e) = transport.send_frame(&frame).await {
+                            if let Err(e) = transport.send_frame(frame).await {
                                 tracing::warn!(
                                     channel_id,
                                     error = ?e,
@@ -840,61 +848,53 @@ pub fn parse_error_payload(payload: &[u8]) -> RpcError {
 #[cfg(test)]
 mod pending_cleanup_tests {
     use super::*;
-    use crate::{EncodeCtx, EncodeError, TransportError};
+    use crate::{RecvFrame, SendFrame, TransportError};
+    use std::sync::atomic::AtomicBool;
     use tokio::sync::mpsc;
 
-    struct DummyEncoder {
-        payload: Vec<u8>,
+    /// A simple sink transport that implements TransportHandle for testing.
+    #[derive(Clone)]
+    struct SinkHandle {
+        tx: mpsc::Sender<SendFrame<Vec<u8>>>,
+        closed: Arc<AtomicBool>,
     }
 
-    impl EncodeCtx for DummyEncoder {
-        fn encode_bytes(&mut self, bytes: &[u8]) -> Result<(), EncodeError> {
-            self.payload.extend_from_slice(bytes);
-            Ok(())
-        }
-
-        fn finish(self: Box<Self>) -> Result<Frame, EncodeError> {
-            Ok(Frame::with_payload(MsgDescHot::new(), self.payload))
-        }
-    }
-
-    struct SinkTransport {
-        tx: mpsc::Sender<Frame>,
-    }
-
-    impl Transport for SinkTransport {
+    impl TransportHandle for SinkHandle {
+        type SendPayload = Vec<u8>;
         type RecvPayload = Vec<u8>;
 
-        async fn send_frame(&self, frame: &Frame) -> Result<(), TransportError> {
+        async fn send_frame(
+            &self,
+            frame: impl Into<SendFrame<Self::SendPayload>>,
+        ) -> Result<(), TransportError> {
             self.tx
-                .send(frame.clone())
+                .send(frame)
                 .await
                 .map_err(|_| TransportError::Closed)
         }
 
-        async fn recv_frame(&self) -> Result<crate::RecvFrame<Self::RecvPayload>, TransportError> {
-            Err(TransportError::Closed)
+        async fn recv_frame(&self) -> Result<RecvFrame<Self::RecvPayload>, TransportError> {
+            // Never returns a frame - just hangs until closed
+            std::future::pending().await
         }
 
-        fn encoder(&self) -> Box<dyn EncodeCtx + '_> {
-            Box::new(DummyEncoder {
-                payload: Vec::new(),
-            })
+        fn close(&self) {
+            self.closed.store(true, Ordering::SeqCst);
         }
 
-        async fn close(&self) -> Result<(), TransportError> {
-            Ok(())
+        fn is_closed(&self) -> bool {
+            self.closed.load(Ordering::SeqCst)
         }
     }
 
     #[tokio::test]
     async fn test_call_cancellation_cleans_pending() {
         let (tx, _rx) = mpsc::channel(8);
-        let client_transport = SinkTransport { tx };
-        let client = Arc::new(RpcSession::with_channel_start(
-            Arc::new(client_transport),
-            2,
-        ));
+        let client_handle = SinkHandle {
+            tx,
+            closed: Arc::new(AtomicBool::new(false)),
+        };
+        let client = Arc::new(RpcSession::with_channel_start(client_handle, 2));
 
         let client2 = client.clone();
         let channel_id = client.next_channel_id();

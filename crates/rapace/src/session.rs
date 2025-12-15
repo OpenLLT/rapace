@@ -13,7 +13,7 @@ use std::sync::Arc;
 use parking_lot::Mutex;
 use rapace_core::{
     ControlPayload, ErrorCode, Frame, FrameFlags, MsgDescHot, NO_DEADLINE, RecvFrame, RpcError,
-    Transport, TransportError, control_method,
+    TransportError, TransportHandle, control_method,
 };
 
 /// Default initial credits for new channels (64KB).
@@ -173,7 +173,7 @@ impl ChannelState {
     }
 }
 
-/// Session wraps a Transport and enforces RPC semantics.
+/// Session wraps a TransportHandle and enforces RPC semantics.
 ///
 /// # Responsibilities
 ///
@@ -186,7 +186,7 @@ impl ChannelState {
 /// # Thread Safety
 ///
 /// Session is `Send + Sync` and can be shared via `Arc<Session<T>>`.
-pub struct Session<T: Transport> {
+pub struct Session<T: TransportHandle> {
     transport: Arc<T>,
     /// Per-channel state. Channel 0 is the control channel.
     channels: Mutex<HashMap<u32, ChannelState>>,
@@ -194,9 +194,9 @@ pub struct Session<T: Transport> {
     tombstones: Mutex<Tombstones>,
 }
 
-impl<T: Transport + Send + Sync> Session<T> {
+impl<T: TransportHandle<SendPayload = Vec<u8>>> Session<T> {
     /// Create a new session wrapping the given transport.
-    pub fn new(transport: Arc<T>) -> Self {
+    pub fn new(transport: T) -> Self {
         Self {
             transport,
             channels: Mutex::new(HashMap::new()),
@@ -239,7 +239,7 @@ impl<T: Transport + Send + Sync> Session<T> {
     /// - Data channels require `payload_len <= available_credits`.
     /// - Tracks EOS to transition channel state.
     /// - Returns `RpcError::Status { code: ResourceExhausted }` if insufficient credits.
-    pub async fn send_frame(&self, frame: &Frame) -> Result<(), RpcError> {
+    pub async fn send_frame(&self, frame: Frame) -> Result<(), RpcError> {
         let channel_id = frame.desc.channel_id;
         let payload_len = frame.desc.payload_len;
         let has_eos = frame.desc.flags.contains(FrameFlags::EOS);
@@ -523,8 +523,8 @@ impl<T: Transport + Send + Sync> Session<T> {
     }
 
     /// Close the session.
-    pub async fn close(&self) -> Result<(), TransportError> {
-        self.transport.close().await
+    pub fn close(&self) {
+        self.transport.close()
     }
 }
 

@@ -119,7 +119,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         tokio::spawn(async move {
             match tokio_tungstenite::accept_async(stream).await {
                 Ok(ws_stream) => {
-                    let transport = Arc::new(WebSocketTransport::new(ws_stream));
+                    // WebSocketTransport has internal Arc, no need to wrap
+                    let transport = WebSocketTransport::new(ws_stream);
                     let server = BrowserDemoServer::new(BrowserDemoImpl);
 
                     if let Err(err) = server.serve(transport).await {

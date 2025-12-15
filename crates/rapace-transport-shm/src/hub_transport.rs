@@ -10,9 +10,7 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
-use rapace_core::{
-    EncodeCtx, EncodeError, Frame, MsgDescHot, RecvFrame, Transport, TransportError,
-};
+use rapace_core::{EncodeCtx, EncodeError, Frame, MsgDescHot};
 use tokio::sync::Mutex as AsyncMutex;
 
 use crate::doorbell::Doorbell;
@@ -124,7 +122,7 @@ impl HubPeerTransport {
             // This moves the blocking wait to spawn_blocking thread pool
             let _ = futex::futex_wait_async_ptr(
                 self.peer.send_data_futex(),
-                Some(std::time::Duration::from_millis(100)),
+                Some(Duration::from_millis(100)),
             )
             .await;
         }
@@ -273,252 +271,9 @@ impl HubHostPeerTransport {
     }
 }
 
-impl Transport for HubHostPeerTransport {
-    type RecvPayload = Vec<u8>;
-
-    async fn send_frame(&self, frame: &Frame) -> Result<(), TransportError> {
-        if self.is_closed() {
-            return Err(TransportError::Closed);
-        }
-
-        let mut desc = frame.desc;
-        let payload = frame.payload();
-
-        if payload.len() <= INLINE_PAYLOAD_SIZE {
-            // Inline payload
-            desc.payload_slot = INLINE_PAYLOAD_SLOT;
-            desc.payload_generation = 0;
-            desc.payload_offset = 0;
-            desc.payload_len = payload.len() as u32;
-            desc.inline_payload[..payload.len()].copy_from_slice(payload);
-        } else {
-            // Allocate slot from shared pool (host owns the slot, owner=0)
-            let (class, global_index, generation) = self
-                .allocator()
-                .alloc(payload.len(), 0)
-                .map_err(|_| TransportError::Encode(EncodeError::NoSlotAvailable))?;
-
-            // Copy payload to slot
-            let slot_ptr = unsafe { self.allocator().slot_data_ptr(class as usize, global_index) };
-            unsafe {
-                std::ptr::copy_nonoverlapping(payload.as_ptr(), slot_ptr, payload.len());
-            }
-
-            // Mark in-flight
-            self.allocator()
-                .mark_in_flight(class, global_index, generation)
-                .map_err(|_| TransportError::Encode(EncodeError::NoSlotAvailable))?;
-
-            desc.payload_slot = encode_slot_ref(class, global_index);
-            desc.payload_generation = generation;
-            desc.payload_offset = 0;
-            desc.payload_len = payload.len() as u32;
-        }
-
-        // Enqueue to peer's recv ring (host sends TO peer's recv)
-        let recv_ring = self.host.peer_recv_ring(self.peer_id);
-
-        const FUTEX_TIMEOUT: Duration = Duration::from_millis(100);
-
-        loop {
-            {
-                let mut local_head = self.local_send_head.lock().await;
-                if recv_ring.enqueue(&mut local_head, &desc).is_ok() {
-                    break;
-                }
-            }
-
-            if self.is_closed() {
-                return Err(TransportError::Closed);
-            }
-            // Use async futex wait to avoid blocking the executor
-            let futex = self.host.peer_recv_data_futex(self.peer_id);
-            let _ = futex::futex_wait_async_ptr(futex, Some(FUTEX_TIMEOUT)).await;
-        }
-
-        // Signal peer
-        self.doorbell.signal();
-        futex::futex_signal(self.host.peer_recv_data_futex(self.peer_id));
-
-        Ok(())
-    }
-
-    async fn recv_frame(&self) -> Result<RecvFrame<Self::RecvPayload>, TransportError> {
-        if self.is_closed() {
-            return Err(TransportError::Closed);
-        }
-
-        // Dequeue from peer's send ring (peer sends TO host, host receives)
-        let send_ring = self.host.peer_send_ring(self.peer_id);
-
-        loop {
-            if let Some(desc) = send_ring.dequeue() {
-                // Signal space available
-                futex::futex_signal(self.host.peer_send_data_futex(self.peer_id));
-
-                // Extract payload
-                let payload = if desc.payload_slot == INLINE_PAYLOAD_SLOT {
-                    desc.inline_payload[..desc.payload_len as usize].to_vec()
-                } else {
-                    let (class, global_index) = decode_slot_ref(desc.payload_slot);
-                    let slot_ptr =
-                        unsafe { self.allocator().slot_data_ptr(class as usize, global_index) };
-                    let slot_ptr = unsafe { slot_ptr.add(desc.payload_offset as usize) };
-                    let payload_data =
-                        unsafe { std::slice::from_raw_parts(slot_ptr, desc.payload_len as usize) }
-                            .to_vec();
-
-                    // Free the slot
-                    let _ = self
-                        .allocator()
-                        .free(class, global_index, desc.payload_generation);
-
-                    payload_data
-                };
-
-                return Ok(RecvFrame::with_payload(desc, payload));
-            }
-
-            if self.is_closed() {
-                return Err(TransportError::Closed);
-            }
-
-            // Wait for data via doorbell
-            if let Err(e) = self.doorbell.wait().await {
-                tracing::warn!(
-                    peer_id = self.peer_id,
-                    peer_name = self.name.as_deref(),
-                    error = %e,
-                    "doorbell wait failed"
-                );
-            }
-            self.doorbell.drain();
-        }
-    }
-
-    fn encoder(&self) -> Box<dyn EncodeCtx + '_> {
-        Box::new(HubEncoder::new())
-    }
-
-    async fn close(&self) -> Result<(), TransportError> {
-        self.closed.store(true, Ordering::Release);
-        Ok(())
-    }
-}
-
-// ============================================================================
-// Transport impl for HubPeerTransport (plugin side)
-// ============================================================================
-
-impl Transport for HubPeerTransport {
-    type RecvPayload = Vec<u8>;
-
-    async fn send_frame(&self, frame: &Frame) -> Result<(), TransportError> {
-        self.peer.update_heartbeat();
-
-        let mut desc = frame.desc;
-        let payload = frame.payload();
-
-        if payload.len() <= INLINE_PAYLOAD_SIZE {
-            desc.payload_slot = INLINE_PAYLOAD_SLOT;
-            desc.payload_generation = 0;
-            desc.payload_offset = 0;
-            desc.payload_len = payload.len() as u32;
-            desc.inline_payload[..payload.len()].copy_from_slice(payload);
-        } else {
-            let (class, global_index, generation) = self
-                .allocator()
-                .alloc(payload.len(), self.peer.peer_id() as u32)
-                .map_err(|_| TransportError::Encode(EncodeError::NoSlotAvailable))?;
-
-            let slot_ptr = unsafe { self.allocator().slot_data_ptr(class as usize, global_index) };
-            unsafe {
-                std::ptr::copy_nonoverlapping(payload.as_ptr(), slot_ptr, payload.len());
-            }
-
-            self.allocator()
-                .mark_in_flight(class, global_index, generation)
-                .map_err(|_| TransportError::Encode(EncodeError::NoSlotAvailable))?;
-
-            desc.payload_slot = encode_slot_ref(class, global_index);
-            desc.payload_generation = generation;
-            desc.payload_offset = 0;
-            desc.payload_len = payload.len() as u32;
-        }
-
-        let send_ring = self.peer.send_ring();
-
-        loop {
-            {
-                let mut local_head = self.local_send_head.lock().await;
-                if send_ring.enqueue(&mut local_head, &desc).is_ok() {
-                    break;
-                }
-            }
-
-            // Use async futex wait to avoid blocking the executor
-            let _ = futex::futex_wait_async_ptr(
-                self.peer.send_data_futex(),
-                Some(Duration::from_millis(100)),
-            )
-            .await;
-        }
-
-        self.doorbell.signal();
-        futex::futex_signal(self.peer.send_data_futex());
-
-        Ok(())
-    }
-
-    async fn recv_frame(&self) -> Result<RecvFrame<Self::RecvPayload>, TransportError> {
-        self.peer.update_heartbeat();
-
-        let recv_ring = self.peer.recv_ring();
-
-        loop {
-            if let Some(desc) = recv_ring.dequeue() {
-                // Signal space available
-                futex::futex_signal(self.peer.recv_data_futex());
-
-                // Extract payload
-                let payload = if desc.payload_slot == INLINE_PAYLOAD_SLOT {
-                    desc.inline_payload[..desc.payload_len as usize].to_vec()
-                } else {
-                    let (class, global_index) = decode_slot_ref(desc.payload_slot);
-                    let slot_ptr =
-                        unsafe { self.allocator().slot_data_ptr(class as usize, global_index) };
-                    let slot_ptr = unsafe { slot_ptr.add(desc.payload_offset as usize) };
-                    let payload_data =
-                        unsafe { std::slice::from_raw_parts(slot_ptr, desc.payload_len as usize) }
-                            .to_vec();
-
-                    // Free the slot
-                    let _ = self
-                        .allocator()
-                        .free(class, global_index, desc.payload_generation);
-
-                    payload_data
-                };
-
-                return Ok(RecvFrame::with_payload(desc, payload));
-            }
-
-            // Wait for data via doorbell
-            if let Err(e) = self.doorbell.wait().await {
-                tracing::warn!(error = %e, "peer doorbell wait failed");
-            }
-            self.doorbell.drain();
-        }
-    }
-
-    fn encoder(&self) -> Box<dyn EncodeCtx + '_> {
-        Box::new(HubEncoder::new())
-    }
-
-    async fn close(&self) -> Result<(), TransportError> {
-        Ok(())
-    }
-}
+// TODO: Implement TransportHandle for HubHostPeerTransport and HubPeerTransport
+// These were removed during the Transport -> TransportHandle migration.
+// The hub architecture may need rethinking for the handle pattern.
 
 // ============================================================================
 // Encoder
@@ -668,8 +423,7 @@ impl HubHostTransport {
 
             // Use async futex wait to avoid blocking the executor
             let futex = self.host.peer_recv_data_futex(peer_id);
-            let _ = futex::futex_wait_async_ptr(futex, Some(std::time::Duration::from_millis(100)))
-                .await;
+            let _ = futex::futex_wait_async_ptr(futex, Some(Duration::from_millis(100))).await;
         }
 
         // Signal peer
@@ -719,7 +473,7 @@ impl HubHostTransport {
             // No data from any peer, wait on any doorbell
             // For now, use a simple timeout-based approach
             // TODO: Use select! to wait on multiple doorbells
-            tokio::time::sleep(std::time::Duration::from_micros(100)).await;
+            tokio::time::sleep(Duration::from_micros(100)).await;
 
             // Also check doorbells
             for peer_handle in &self.peers {

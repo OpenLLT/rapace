@@ -17,7 +17,7 @@
 use std::sync::Arc;
 
 use rapace::RpcSession;
-use rapace::Transport;
+use rapace::TransportHandle;
 use rapace::transport::StreamTransport;
 use rapace::transport::shm::{ShmMetrics, ShmSession, ShmSessionConfig, ShmTransport};
 use tokio::io::{AsyncRead, AsyncWrite, ReadHalf, WriteHalf};
@@ -79,11 +79,11 @@ fn parse_args() -> Args {
     }
 }
 
-async fn run_plugin<T: Transport + Send + Sync + 'static>(transport: Arc<T>) {
+async fn run_plugin<T: TransportHandle<SendPayload = Vec<u8>>>(transport: T) {
     let metrics = Arc::new(GlobalTunnelMetrics::new());
 
     // Plugin uses even channel IDs (2, 4, 6, ...)
-    let session = Arc::new(RpcSession::with_channel_start(transport.clone(), 2));
+    let session = Arc::new(RpcSession::with_channel_start(transport, 2));
 
     // Create the tunnel service
     let tunnel_service = Arc::new(TcpTunnelImpl::with_metrics(
@@ -107,7 +107,7 @@ async fn run_plugin<T: Transport + Send + Sync + 'static>(transport: Arc<T>) {
 
 async fn run_plugin_stream<S: AsyncRead + AsyncWrite + Send + Sync + 'static>(stream: S) {
     let transport: StreamTransport<ReadHalf<S>, WriteHalf<S>> = StreamTransport::new(stream);
-    run_plugin(Arc::new(transport)).await;
+    run_plugin(transport).await;
 }
 
 #[tokio::main]
@@ -207,7 +207,7 @@ async fn main() {
 
             // Create metrics for SHM transport
             let shm_metrics = Arc::new(ShmMetrics::new());
-            let transport = Arc::new(ShmTransport::new_with_metrics(session, shm_metrics.clone()));
+            let transport = ShmTransport::new_with_metrics(session, shm_metrics.clone());
             eprintln!("[http-tunnel-plugin] SHM mapped!");
             run_plugin(transport).await;
             eprintln!(

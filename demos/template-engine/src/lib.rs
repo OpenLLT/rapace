@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use rapace::{Frame, RpcError, RpcSession, Transport};
+use rapace::{Frame, RpcError, RpcSession, TransportHandle};
 
 // ============================================================================
 // Service Definitions (Transport-Agnostic)
@@ -85,11 +85,11 @@ impl ValueHost for ValueHostImpl {
 /// Plugin-side implementation of TemplateEngine.
 ///
 /// Uses the RpcSession to call back into the host for values.
-pub struct TemplateEngineImpl<T: Transport + Send + Sync + 'static> {
+pub struct TemplateEngineImpl<T: TransportHandle<SendPayload = Vec<u8>> + Send + Sync + 'static> {
     client: ValueHostClient<T>,
 }
 
-impl<T: Transport + Send + Sync + 'static> TemplateEngineImpl<T> {
+impl<T: TransportHandle<SendPayload = Vec<u8>> + Send + Sync + 'static> TemplateEngineImpl<T> {
     pub fn new(session: Arc<RpcSession<T>>) -> Self {
         Self {
             client: ValueHostClient::new(session),
@@ -97,7 +97,9 @@ impl<T: Transport + Send + Sync + 'static> TemplateEngineImpl<T> {
     }
 }
 
-impl<T: Transport + Send + Sync + 'static> TemplateEngine for TemplateEngineImpl<T> {
+impl<T: TransportHandle<SendPayload = Vec<u8>> + Send + Sync + 'static> TemplateEngine
+    for TemplateEngineImpl<T>
+{
     async fn render(&self, template: String) -> String {
         let mut result = String::new();
         let mut chars = template.chars().peekable();
@@ -174,7 +176,9 @@ pub fn create_value_host_dispatcher(
 }
 
 /// Create a dispatcher for TemplateEngine service.
-pub fn create_template_engine_dispatcher<T: Transport + Send + Sync + 'static>(
+pub fn create_template_engine_dispatcher<
+    T: TransportHandle<SendPayload = Vec<u8>> + Send + Sync + 'static,
+>(
     session: Arc<RpcSession<T>>,
 ) -> impl Fn(
     u32,

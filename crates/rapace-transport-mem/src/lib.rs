@@ -21,7 +21,8 @@
 use std::sync::Arc;
 
 use rapace_core::{
-    DecodeError, EncodeCtx, EncodeError, Frame, MsgDescHot, RecvFrame, Transport, TransportError,
+    DecodeError, EncodeCtx, EncodeError, Frame, MsgDescHot, RecvFrame, SendFrame, TransportError,
+    TransportHandle,
 };
 use tokio::sync::mpsc;
 
@@ -32,6 +33,7 @@ const CHANNEL_CAPACITY: usize = 64;
 ///
 /// This transport passes frames through async channels without serialization.
 /// It serves as the semantic reference for correct RPC behavior.
+#[derive(Clone)]
 pub struct InProcTransport {
     inner: Arc<InProcInner>,
 }
@@ -74,20 +76,25 @@ impl InProcTransport {
     }
 }
 
-impl Transport for InProcTransport {
-    /// Payload type for received frames.
-    /// For now we use `Vec<u8>`; Phase 2 will introduce pooled buffers.
+impl TransportHandle for InProcTransport {
+    type SendPayload = Vec<u8>;
     type RecvPayload = Vec<u8>;
 
-    async fn send_frame(&self, frame: &Frame) -> Result<(), TransportError> {
+    async fn send_frame(
+        &self,
+        frame: impl Into<SendFrame<Self::SendPayload>>,
+    ) -> Result<(), TransportError> {
         if self.is_closed() {
             return Err(TransportError::Closed);
         }
 
+        // Convert SendFrame to Frame
+        let frame: Frame = frame.into();
+
         // Clone the frame for sending (in-proc still needs ownership transfer)
         self.inner
             .tx
-            .send(frame.clone())
+            .send(frame)
             .await
             .map_err(|_| TransportError::Closed)
     }
@@ -113,15 +120,14 @@ impl Transport for InProcTransport {
         }
     }
 
-    fn encoder(&self) -> Box<dyn EncodeCtx + '_> {
-        Box::new(InProcEncoder::new())
-    }
-
-    async fn close(&self) -> Result<(), TransportError> {
+    fn close(&self) {
         self.inner
             .closed
             .store(true, std::sync::atomic::Ordering::Release);
-        Ok(())
+    }
+
+    fn is_closed(&self) -> bool {
+        self.inner.closed.load(std::sync::atomic::Ordering::Acquire)
     }
 }
 

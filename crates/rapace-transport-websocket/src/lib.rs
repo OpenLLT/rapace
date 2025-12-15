@@ -9,7 +9,7 @@
 
 use rapace_core::{
     DecodeError, EncodeCtx, EncodeError, Frame, INLINE_PAYLOAD_SIZE, INLINE_PAYLOAD_SLOT,
-    MsgDescHot, RecvFrame, Transport, TransportError,
+    MsgDescHot, RecvFrame, SendFrame, TransportError, TransportHandle,
 };
 
 mod shared {
@@ -207,7 +207,25 @@ mod native {
         }
     }
 
-    impl<WS, M> Transport for WebSocketTransport<WS, M>
+    // Manual Clone impl - only clone the Arc, not the inner WS/M types
+    impl<WS, M> Clone for WebSocketTransport<WS, M>
+    where
+        WS: Stream<Item = Result<M, <WS as StreamErrorType>::Error>>
+            + Sink<M>
+            + StreamErrorType
+            + Unpin
+            + Send
+            + 'static,
+        M: WsMessage,
+    {
+        fn clone(&self) -> Self {
+            Self {
+                inner: self.inner.clone(),
+            }
+        }
+    }
+
+    impl<WS, M> TransportHandle for WebSocketTransport<WS, M>
     where
         WS: Stream<Item = Result<M, <WS as StreamErrorType>::Error>>
             + Sink<M>
@@ -217,18 +235,20 @@ mod native {
             + Sync
             + 'static,
         <WS as Sink<M>>::Error: std::error::Error + Send + Sync + 'static,
-        M: WsMessage,
+        M: WsMessage + 'static,
     {
-        /// Payload type for received frames.
-        /// For now we use `Vec<u8>`; Phase 2 will introduce pooled buffers.
+        type SendPayload = Vec<u8>;
         type RecvPayload = Vec<u8>;
 
-        async fn send_frame(&self, frame: &Frame) -> Result<(), TransportError> {
+        async fn send_frame(
+            &self,
+            frame: impl Into<SendFrame<Self::SendPayload>>,
+        ) -> Result<(), TransportError> {
             if self.is_closed() {
                 return Err(TransportError::Closed);
             }
 
-            let payload = frame.payload();
+            let payload = frame.payload_bytes();
 
             // Build message: descriptor + payload
             let mut data = Vec::with_capacity(DESC_SIZE + payload.len());
@@ -304,18 +324,18 @@ mod native {
             }
         }
 
-        fn encoder(&self) -> Box<dyn EncodeCtx + '_> {
-            Box::new(WebSocketEncoder::new())
+        fn close(&self) {
+            self.inner.closed.store(true, Ordering::Release);
+            // Fire-and-forget: spawn the close frame send
+            let inner = self.inner.clone();
+            tokio::spawn(async move {
+                let mut sink = inner.sink.lock().await;
+                let _ = sink.send(M::close()).await;
+            });
         }
 
-        async fn close(&self) -> Result<(), TransportError> {
-            self.inner.closed.store(true, Ordering::Release);
-
-            // Send WebSocket close frame
-            let mut sink = self.inner.sink.lock().await;
-            let _ = sink.send(M::close()).await;
-
-            Ok(())
+        fn is_closed(&self) -> bool {
+            self.inner.closed.load(Ordering::Acquire)
         }
     }
 }
@@ -716,16 +736,27 @@ mod wasm {
         }
     }
 
-    impl Transport for WebSocketTransport {
-        /// Payload type for received frames.
+    impl Clone for WebSocketTransport {
+        fn clone(&self) -> Self {
+            Self {
+                inner: self.inner.clone(),
+            }
+        }
+    }
+
+    impl TransportHandle for WebSocketTransport {
+        type SendPayload = Vec<u8>;
         type RecvPayload = Vec<u8>;
 
-        async fn send_frame(&self, frame: &Frame) -> Result<(), TransportError> {
+        async fn send_frame(
+            &self,
+            frame: impl Into<SendFrame<Self::SendPayload>>,
+        ) -> Result<(), TransportError> {
             if self.is_closed() {
                 return Err(TransportError::Closed);
             }
 
-            let payload = frame.payload();
+            let payload = frame.payload_bytes();
             let mut data = Vec::with_capacity(DESC_SIZE + payload.len());
             data.extend_from_slice(&to_bytes(&frame.desc));
             data.extend_from_slice(payload);
@@ -765,14 +796,13 @@ mod wasm {
             }
         }
 
-        fn encoder(&self) -> Box<dyn EncodeCtx + '_> {
-            Box::new(WebSocketEncoder::new())
-        }
-
-        async fn close(&self) -> Result<(), TransportError> {
+        fn close(&self) {
             self.inner.closed.store(true, Ordering::Release);
             self.inner.ws.close();
-            Ok(())
+        }
+
+        fn is_closed(&self) -> bool {
+            self.inner.closed.load(Ordering::Acquire)
         }
     }
 

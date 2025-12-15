@@ -130,9 +130,9 @@ pub use rapace_core::{
     RpcSession,
     // Streaming
     Streaming,
-    // Transport trait (for advanced use)
-    Transport,
+    // Transport traits (for advanced use)
     TransportError,
+    TransportHandle,
     ValidationError,
     // Error payload parsing
     parse_error_payload,
@@ -162,7 +162,7 @@ pub use rapace_registry as registry;
 /// use rapace::prelude::*;
 /// ```
 pub mod prelude {
-    pub use crate::{ErrorCode, RpcError, Streaming, Transport, service};
+    pub use crate::{ErrorCode, RpcError, Streaming, TransportHandle, service};
 
     // Re-export facet for derive macros in service types
     pub use facet::Facet;

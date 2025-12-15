@@ -34,7 +34,7 @@ use std::io::Cursor;
 use std::sync::Arc;
 
 use rapace::{
-    ErrorCode, RpcError, RpcSession, Streaming, Transport,
+    ErrorCode, RpcError, RpcSession, Streaming, TransportHandle,
     transport::shm::{ShmAllocator, ShmMetrics, ShmSession, ShmTransport, allocator_api2},
 };
 
@@ -179,15 +179,9 @@ async fn main() {
     // Create a connected pair of SHM sessions.
     let (session_a, session_b) = ShmSession::create_pair().expect("Failed to create SHM sessions");
 
-    // Create transports with metrics enabled.
-    let transport_a = Arc::new(ShmTransport::new_with_metrics(
-        session_a.clone(),
-        metrics.clone(),
-    ));
-    let transport_b = Arc::new(ShmTransport::new_with_metrics(
-        session_b.clone(),
-        metrics.clone(),
-    ));
+    // Create transports with metrics enabled (transports have internal Arc, cheap to clone).
+    let transport_a = ShmTransport::new_with_metrics(session_a.clone(), metrics.clone());
+    let transport_b = ShmTransport::new_with_metrics(session_b.clone(), metrics.clone());
 
     // Create an allocator from session A (the "host" side).
     let alloc = ShmAllocator::new(session_a.clone());
@@ -207,72 +201,15 @@ async fn main() {
     println!("Test image created: {} bytes", test_png.len());
 
     // === DEMONSTRATION 1: Regular allocation (will copy) ===
-    println!("\n--- Demo 1: Regular Vec (will copy) ---");
-    {
-        let before_zero = metrics.zero_copy_count();
-        let before_copy = metrics.copy_count();
-
-        // This Vec is on the heap, NOT in SHM.
-        let regular_vec = test_png.clone();
-
-        // When we check if it's in SHM, it won't be.
-        let in_shm = session_a
-            .find_slot_location(regular_vec.as_ptr(), regular_vec.len())
-            .is_some();
-        println!("  Regular Vec in SHM: {}", in_shm);
-
-        // Encode it through the transport's encoder.
-        let mut encoder = transport_a.encoder();
-        encoder.encode_bytes(&regular_vec).unwrap();
-        let _ = encoder.finish().unwrap();
-
-        let after_zero = metrics.zero_copy_count();
-        let after_copy = metrics.copy_count();
-        println!(
-            "  Metrics: zero-copy {} -> {}, copy {} -> {}",
-            before_zero, after_zero, before_copy, after_copy
-        );
-    }
+    // NOTE: Encoder API removed in TransportHandle refactor
+    // TODO: Rewrite this demo to use send_frame API
+    println!("\n--- Demo 1: Regular Vec (skipped - encoder API removed) ---");
+    let _ = &test_png; // suppress unused warning
 
     // === DEMONSTRATION 2: SHM allocation (zero-copy) ===
-    println!("\n--- Demo 2: ShmAllocator Vec (zero-copy) ---");
-    {
-        let before_zero = metrics.zero_copy_count();
-        let before_copy = metrics.copy_count();
-
-        // This Vec is allocated directly in SHM!
-        let mut shm_vec: AllocVec<u8, _> = AllocVec::new_in(alloc.clone());
-        shm_vec.extend_from_slice(&test_png);
-
-        // When we check if it's in SHM, it will be!
-        let in_shm = session_a
-            .find_slot_location(shm_vec.as_ptr(), shm_vec.len())
-            .is_some();
-        println!("  SHM Vec in SHM: {}", in_shm);
-
-        // Get the slot info for demonstration.
-        if let Some((slot, offset)) = session_a.find_slot_location(shm_vec.as_ptr(), shm_vec.len())
-        {
-            println!("  Slot index: {}", slot);
-            println!("  Offset in slot: {} bytes", offset);
-            println!("  Data length: {} bytes", shm_vec.len());
-        }
-
-        // Encode it through the transport's encoder.
-        let mut encoder = transport_a.encoder();
-        encoder.encode_bytes(&shm_vec).unwrap();
-        let frame = encoder.finish().unwrap();
-
-        let after_zero = metrics.zero_copy_count();
-        let after_copy = metrics.copy_count();
-        println!(
-            "  Metrics: zero-copy {} -> {}, copy {} -> {}",
-            before_zero, after_zero, before_copy, after_copy
-        );
-
-        // Show that the frame has no external payload (it references SHM directly).
-        println!("  Frame has external payload: {}", frame.payload.is_some());
-    }
+    // NOTE: Encoder API removed in TransportHandle refactor
+    // TODO: Rewrite this demo to use send_frame API
+    println!("\n--- Demo 2: ShmAllocator Vec (skipped - encoder API removed) ---");
 
     // === DEMONSTRATION 3: RPC call pattern ===
     println!("\n--- Demo 3: Simulated RPC Pattern ---");
@@ -322,12 +259,14 @@ async fn main() {
         // Spawn server task
         let server_handle = tokio::spawn(async move {
             // Handle one request then exit
-            if let Err(e) = server.serve_one(&*transport_b).await {
+            // transport_b is Clone (has internal Arc)
+            if let Err(e) = server.serve_one(&transport_b).await {
                 eprintln!("Server error: {:?}", e);
             }
         });
 
         // Create client session and spawn its demux loop
+        // transport_a is Clone (has internal Arc)
         let client_session = std::sync::Arc::new(RpcSession::new(transport_a.clone()));
         let client_session_runner = client_session.clone();
         tokio::spawn(async move { client_session_runner.run().await });
@@ -373,8 +312,8 @@ async fn main() {
             before_zero, after_zero, before_copy, after_copy
         );
 
-        // Clean up
-        let _ = transport_a.close().await;
+        // Clean up (close is now sync)
+        transport_a.close();
         let _ = server_handle.await;
     }
 
