@@ -184,7 +184,7 @@ pub mod transport {
     pub use rapace_core::mem::MemTransport;
 
     #[cfg(feature = "stream")]
-    pub use rapace_core::transport::stream::StreamTransport;
+    pub use rapace_core::stream::StreamTransport;
 
     #[cfg(feature = "websocket")]
     pub use rapace_core::websocket::WebSocketTransport;
@@ -239,8 +239,7 @@ pub mod server {
     /// ```
     pub fn serve_connection(
         stream: TcpStream,
-    ) -> Arc<crate::StreamTransport<tokio::io::ReadHalf<TcpStream>, tokio::io::WriteHalf<TcpStream>>>
-    {
+    ) -> Arc<crate::StreamTransport> {
         Arc::new(crate::StreamTransport::new(stream))
     }
 
@@ -293,12 +292,7 @@ pub mod server {
         /// Serve requests from the TCP transport until the connection closes.
         fn serve_tcp(
             self,
-            transport: Arc<
-                crate::StreamTransport<
-                    tokio::io::ReadHalf<TcpStream>,
-                    tokio::io::WriteHalf<TcpStream>,
-                >,
-            >,
+            transport: Arc<crate::StreamTransport>,
         ) -> impl std::future::Future<Output = Result<(), crate::RpcError>> + Send;
     }
 }

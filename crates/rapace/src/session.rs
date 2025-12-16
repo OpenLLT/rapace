@@ -12,8 +12,8 @@ use std::sync::Arc;
 
 use parking_lot::Mutex;
 use rapace_core::{
-    ControlPayload, ErrorCode, Frame, FrameFlags, MsgDescHot, NO_DEADLINE, RecvFrame, RpcError,
-    Transport, TransportError, control_method,
+    ControlPayload, ErrorCode, Frame, FrameFlags, MsgDescHot, NO_DEADLINE, RpcError, Transport,
+    TransportError, control_method,
 };
 
 /// Default initial credits for new channels (64KB).
@@ -325,7 +325,7 @@ impl Session {
     /// - Tracks EOS to transition channel state.
     /// - Drops data frames for cancelled/closed channels.
     /// - Returns frames that should be dispatched.
-    pub async fn recv_frame(&self) -> Result<RecvFrame<Vec<u8>>, TransportError> {
+    pub async fn recv_frame(&self) -> Result<Frame, TransportError> {
         loop {
             let frame = self.transport.recv_frame().await?;
 
@@ -498,7 +498,7 @@ impl Session {
     }
 
     /// Process a control frame, updating session state.
-    fn process_control_frame(&self, frame: &RecvFrame<Vec<u8>>) {
+    fn process_control_frame(&self, frame: &Frame) {
         match frame.desc.method_id {
             control_method::CANCEL_CHANNEL => {
                 // Try to decode CancelChannel payload
