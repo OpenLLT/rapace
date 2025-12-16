@@ -184,7 +184,7 @@ pub mod transport {
     pub use rapace_transport_mem::InProcTransport;
 
     #[cfg(feature = "stream")]
-    pub use rapace_transport_stream::StreamTransport;
+    pub use rapace_core::transport::stream::StreamTransport;
 
     #[cfg(feature = "websocket")]
     pub use rapace_transport_websocket::WebSocketTransport;

@@ -25,7 +25,6 @@ rapace-registry = { workspace = true }
 
 # Transports (behind feature flags)
 rapace-transport-mem = { workspace = true, optional = true }
-rapace-transport-stream = { workspace = true, optional = true }
 rapace-transport-websocket = { workspace = true, optional = true }
 rapace-transport-shm = { workspace = true, optional = true, features = ["allocator"] }
 
@@ -51,7 +50,7 @@ default = ["mem", "stream", "shm"]
 
 # Transport features
 mem = ["dep:rapace-transport-mem"]
-stream = ["dep:rapace-transport-stream", "dep:tokio"]
+stream = ["dep:tokio"]
 websocket = ["dep:rapace-transport-websocket"]
 shm = ["dep:rapace-transport-shm"]
 

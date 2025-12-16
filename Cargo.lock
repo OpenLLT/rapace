@@ -1493,7 +1493,6 @@ dependencies = [
  "rapace-registry",
  "rapace-transport-mem",
  "rapace-transport-shm",
- "rapace-transport-stream",
  "rapace-transport-websocket",
  "tokio",
  "tokio-stream",
@@ -1770,16 +1769,6 @@ dependencies = [
  "static_assertions",
  "tokio",
  "tracing",
-]
-
-[[package]]
-name = "rapace-transport-stream"
-version = "0.4.0"
-dependencies = [
- "rapace-core",
- "rapace-testkit",
- "static_assertions",
- "tokio",
 ]
 
 [[package]]
