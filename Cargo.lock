@@ -1537,6 +1537,7 @@ dependencies = [
  "parking_lot",
  "static_assertions",
  "tokio",
+ "tokio-tungstenite",
  "tracing",
 ]
 
