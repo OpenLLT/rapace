@@ -23,11 +23,6 @@ rapace-macros = { workspace = true }
 # Registry for service/method metadata
 rapace-registry = { workspace = true }
 
-# Transports (behind feature flags)
-rapace-transport-mem = { workspace = true, optional = true }
-rapace-transport-websocket = { workspace = true, optional = true }
-rapace-transport-shm = { workspace = true, optional = true, features = ["allocator"] }
-
 # Serialization
 facet = { workspace = true }
 facet-core = { workspace = true }
@@ -49,10 +44,10 @@ tokio-stream = { workspace = true }
 default = ["mem", "stream", "shm"]
 
 # Transport features
-mem = ["dep:rapace-transport-mem"]
-stream = ["dep:tokio"]
-websocket = ["dep:rapace-transport-websocket"]
-shm = ["dep:rapace-transport-shm"]
+mem = ["rapace-core/mem"]
+stream = ["rapace-core/stream", "dep:tokio"]
+websocket = ["rapace-core/websocket"]
+shm = ["rapace-core/shm"]
 
 # All transports
 full = ["mem", "stream", "websocket", "shm"]

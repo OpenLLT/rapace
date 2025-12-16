@@ -540,7 +540,7 @@ fn now_ns() -> u64 {
 mod tests {
     use super::*;
     use rapace_core::control_method;
-    use rapace_transport_mem::InProcTransport;
+    use rapace_core::mem::MemTransport;
 
     fn data_eos_frame(channel_id: u32) -> Frame {
         let mut desc = MsgDescHot::new();
@@ -572,7 +572,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_closed_channel_is_pruned_and_tombstoned() {
-        let (a, b) = InProcTransport::pair();
+        let (a, b) = MemTransport::pair();
         let session = Session::new(Arc::new(a));
 
         // Local EOS: Open -> HalfClosedLocal (state created)
@@ -588,7 +588,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_late_frames_on_closed_channel_are_dropped() {
-        let (a, b) = InProcTransport::pair();
+        let (a, b) = MemTransport::pair();
         let session = Session::new(Arc::new(a));
 
         // Close channel 2
@@ -613,7 +613,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_cancelled_channel_is_tombstoned_and_drops_late_frames() {
-        let (a, b) = InProcTransport::pair();
+        let (a, b) = MemTransport::pair();
         let session = Session::new(Arc::new(a));
 
         b.send_frame(&cancel_frame(2)).await.unwrap();

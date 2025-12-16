@@ -27,12 +27,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "allocator-api2"
-version = "0.2.21"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "683d7910e743518b0e34f1186f92494becacb047c7b6bf616c96772180fef923"
-
-[[package]]
 name = "anstream"
 version = "0.6.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -145,7 +139,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5b098575ebe77cb6d14fc7f32749631a6e44edbef6b796f89b020e99ba20d425"
 dependencies = [
  "axum-core",
- "base64",
  "bytes",
  "form_urlencoded",
  "futures-util",
@@ -164,10 +157,8 @@ dependencies = [
  "serde_json",
  "serde_path_to_error",
  "serde_urlencoded",
- "sha1",
  "sync_wrapper",
  "tokio",
- "tokio-tungstenite",
  "tower",
  "tower-layer",
  "tower-service",
@@ -666,7 +657,7 @@ version = "3.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f288b0a4f20f9a56b5d1da57e2227c661b7b16168e2f72365f57b63326e29b24"
 dependencies = [
- "gloo-timers 0.2.6",
+ "gloo-timers",
  "send_wrapper",
 ]
 
@@ -736,18 +727,6 @@ name = "gloo-timers"
 version = "0.2.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9b995a66bb87bebce9a0f4a95aed01daca4872c050bfcb21653361c03bc35e5c"
-dependencies = [
- "futures-channel",
- "futures-core",
- "js-sys",
- "wasm-bindgen",
-]
-
-[[package]]
-name = "gloo-timers"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bbb143cf96099802033e0d4f4963b19fd2e0b728bcf076cd9cf7f6634f092994"
 dependencies = [
  "futures-channel",
  "futures-core",
@@ -1491,9 +1470,6 @@ dependencies = [
  "rapace-core",
  "rapace-macros",
  "rapace-registry",
- "rapace-transport-mem",
- "rapace-transport-shm",
- "rapace-transport-websocket",
  "tokio",
  "tokio-stream",
  "tracing",
@@ -1708,7 +1684,6 @@ dependencies = [
  "rapace",
  "rapace-core",
  "rapace-registry",
- "rapace-transport-mem",
  "tokio",
  "tokio-stream",
 ]
@@ -1737,55 +1712,6 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
-]
-
-[[package]]
-name = "rapace-transport"
-version = "0.4.0"
-dependencies = [
- "rapace-core",
-]
-
-[[package]]
-name = "rapace-transport-mem"
-version = "0.4.0"
-dependencies = [
- "rapace-core",
- "rapace-testkit",
- "static_assertions",
- "tokio",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "rapace-transport-shm"
-version = "0.4.0"
-dependencies = [
- "allocator-api2",
- "libc",
- "rapace-core",
- "rapace-testkit",
- "static_assertions",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "rapace-transport-websocket"
-version = "0.4.0"
-dependencies = [
- "axum",
- "futures",
- "gloo-timers 0.3.0",
- "js-sys",
- "rapace-core",
- "rapace-testkit",
- "static_assertions",
- "tokio",
- "tokio-tungstenite",
- "wasm-bindgen",
- "web-sys",
 ]
 
 [[package]]

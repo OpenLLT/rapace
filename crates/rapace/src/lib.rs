@@ -181,18 +181,18 @@ pub mod prelude {
 /// ```
 pub mod transport {
     #[cfg(feature = "mem")]
-    pub use rapace_transport_mem::InProcTransport;
+    pub use rapace_core::mem::MemTransport;
 
     #[cfg(feature = "stream")]
     pub use rapace_core::transport::stream::StreamTransport;
 
     #[cfg(feature = "websocket")]
-    pub use rapace_transport_websocket::WebSocketTransport;
+    pub use rapace_core::websocket::WebSocketTransport;
 
     // Note: SHM transport requires more setup, exposed separately
     #[cfg(feature = "shm")]
     pub mod shm {
-        pub use rapace_transport_shm::*;
+        pub use rapace_core::shm::*;
     }
 }
 
@@ -200,7 +200,7 @@ pub mod transport {
 pub mod session;
 
 #[cfg(feature = "mem")]
-pub use transport::InProcTransport;
+pub use transport::MemTransport;
 
 #[cfg(feature = "stream")]
 pub use transport::StreamTransport;
