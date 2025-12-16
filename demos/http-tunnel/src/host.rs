@@ -7,7 +7,7 @@
 
 use std::sync::Arc;
 
-use rapace::{RpcSession, TransportHandle};
+use rapace::RpcSession;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
@@ -20,13 +20,13 @@ pub const CHUNK_SIZE: usize = 4096;
 /// Host-side tunnel handler.
 ///
 /// Manages the connection between browser and plugin through rapace tunnels.
-pub struct TunnelHost<T: TransportHandle<SendPayload = Vec<u8>>> {
-    client: TcpTunnelClient<T>,
+pub struct TunnelHost {
+    client: TcpTunnelClient,
     metrics: Arc<GlobalTunnelMetrics>,
 }
 
-impl<T: TransportHandle<SendPayload = Vec<u8>>> TunnelHost<T> {
-    pub fn new(session: Arc<RpcSession<T>>) -> Self {
+impl TunnelHost {
+    pub fn new(session: Arc<RpcSession>) -> Self {
         let client = TcpTunnelClient::new(session);
         Self {
             client,
@@ -34,7 +34,7 @@ impl<T: TransportHandle<SendPayload = Vec<u8>>> TunnelHost<T> {
         }
     }
 
-    pub fn with_metrics(session: Arc<RpcSession<T>>, metrics: Arc<GlobalTunnelMetrics>) -> Self {
+    pub fn with_metrics(session: Arc<RpcSession>, metrics: Arc<GlobalTunnelMetrics>) -> Self {
         let client = TcpTunnelClient::new(session);
         Self { client, metrics }
     }
@@ -109,14 +109,15 @@ impl<T: TransportHandle<SendPayload = Vec<u8>>> TunnelHost<T> {
         let tunnel_metrics_b = tunnel_metrics.clone();
         tokio::spawn(async move {
             while let Some(chunk) = tunnel_rx.recv().await {
-                if !chunk.payload.is_empty() {
-                    tunnel_metrics_b.record_recv(chunk.payload.len());
-                    if let Err(e) = browser_write.write_all(&chunk.payload).await {
+                let payload = chunk.payload_bytes();
+                if !payload.is_empty() {
+                    tunnel_metrics_b.record_recv(payload.len());
+                    if let Err(e) = browser_write.write_all(payload).await {
                         tracing::debug!(channel_id, error = %e, "browser write error");
                         break;
                     }
                 }
-                if chunk.is_eos {
+                if chunk.is_eos() {
                     tracing::debug!(channel_id, "received EOS from plugin");
                     // Half-close the browser write side
                     let _ = browser_write.shutdown().await;
@@ -131,8 +132,8 @@ impl<T: TransportHandle<SendPayload = Vec<u8>>> TunnelHost<T> {
 }
 
 /// Run the host server that accepts browser connections and tunnels them to the plugin.
-pub async fn run_host_server<T: TransportHandle<SendPayload = Vec<u8>>>(
-    host: Arc<TunnelHost<T>>,
+pub async fn run_host_server(
+    host: Arc<TunnelHost>,
     listen_port: u16,
 ) -> std::io::Result<()> {
     let listener = TcpListener::bind(format!("127.0.0.1:{}", listen_port)).await?;

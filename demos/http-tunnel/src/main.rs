@@ -12,8 +12,7 @@
 
 use std::sync::Arc;
 
-use rapace::RpcSession;
-use rapace::transport::InProcTransport;
+use rapace::{RpcSession, Transport};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use rapace_http_tunnel::{
@@ -38,7 +37,7 @@ async fn main() {
     println!("=== HTTP Tunnel over Rapace Demo ===\n");
 
     // Create in-memory transport pair for the demo
-    let (host_transport, cell_transport) = InProcTransport::pair();
+    let (host_transport, cell_transport) = Transport::inproc_pair();
 
     // Shared metrics
     let host_metrics = Arc::new(GlobalTunnelMetrics::new());
