@@ -31,8 +31,8 @@
 use std::sync::Arc;
 
 use rapace::transport::shm::{ShmSession, ShmSessionConfig, ShmTransport};
-use rapace::{RpcSession, StreamTransport, TransportHandle};
-use tokio::io::{AsyncRead, AsyncWrite, ReadHalf, WriteHalf};
+use rapace::{RpcSession, Transport};
+use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpStream;
 
 use rapace_template_engine::create_template_engine_dispatcher;
@@ -133,12 +133,12 @@ async fn accept_inherited_stream() -> Option<TcpStream> {
     None
 }
 
-async fn run_plugin_stream<S: AsyncRead + AsyncWrite + Send + Sync + 'static>(stream: S) {
-    let transport: StreamTransport<ReadHalf<S>, WriteHalf<S>> = StreamTransport::new(stream);
+async fn run_plugin_stream<S: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static>(stream: S) {
+    let transport = Transport::stream(stream);
     run_plugin(transport).await;
 }
 
-async fn run_plugin<T: TransportHandle<SendPayload = Vec<u8>>>(transport: T) {
+async fn run_plugin(transport: Transport) {
     // Plugin uses even channel IDs (2, 4, 6, ...)
     let session = Arc::new(RpcSession::with_channel_start(transport, 2));
 
@@ -222,7 +222,7 @@ async fn main() {
             eprintln!("[helper] Opening SHM file: {}", addr);
             let session = ShmSession::open_file(addr, ShmSessionConfig::default())
                 .expect("failed to open SHM file");
-            let transport = ShmTransport::new(session);
+            let transport = Transport::Shm(ShmTransport::new(session));
             eprintln!("[helper] SHM mapped!");
             run_plugin(transport).await;
         }

@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use rapace::{Frame, RpcError, RpcSession, TransportHandle};
+use rapace::{Frame, RpcError, RpcSession};
 
 // ============================================================================
 // Service Definitions (Transport-Agnostic)
@@ -85,21 +85,19 @@ impl ValueHost for ValueHostImpl {
 /// Plugin-side implementation of TemplateEngine.
 ///
 /// Uses the RpcSession to call back into the host for values.
-pub struct TemplateEngineImpl<T: TransportHandle<SendPayload = Vec<u8>> + Send + Sync + 'static> {
-    client: ValueHostClient<T>,
+pub struct TemplateEngineImpl {
+    client: ValueHostClient,
 }
 
-impl<T: TransportHandle<SendPayload = Vec<u8>> + Send + Sync + 'static> TemplateEngineImpl<T> {
-    pub fn new(session: Arc<RpcSession<T>>) -> Self {
+impl TemplateEngineImpl {
+    pub fn new(session: Arc<RpcSession>) -> Self {
         Self {
             client: ValueHostClient::new(session),
         }
     }
 }
 
-impl<T: TransportHandle<SendPayload = Vec<u8>> + Send + Sync + 'static> TemplateEngine
-    for TemplateEngineImpl<T>
-{
+impl TemplateEngine for TemplateEngineImpl {
     async fn render(&self, template: String) -> String {
         let mut result = String::new();
         let mut chars = template.chars().peekable();
@@ -158,39 +156,34 @@ impl<T: TransportHandle<SendPayload = Vec<u8>> + Send + Sync + 'static> Template
 /// Create a dispatcher for ValueHost service.
 pub fn create_value_host_dispatcher(
     value_host: Arc<ValueHostImpl>,
-) -> impl Fn(
-    u32,
-    u32,
-    Vec<u8>,
-) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Frame, RpcError>> + Send>>
+) -> impl Fn(Frame) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Frame, RpcError>> + Send>>
 + Send
 + Sync
 + 'static {
-    move |_channel_id, method_id, payload| {
+    move |request| {
         let value_host = value_host.clone();
         Box::pin(async move {
             let server = ValueHostServer::new(value_host.as_ref().clone());
-            server.dispatch(method_id, &payload).await
+            server.dispatch(request.desc.method_id, request.payload_bytes())
+                .await
         })
     }
 }
 
 /// Create a dispatcher for TemplateEngine service.
-pub fn create_template_engine_dispatcher<
-    T: TransportHandle<SendPayload = Vec<u8>> + Send + Sync + 'static,
->(
-    session: Arc<RpcSession<T>>,
-) -> impl Fn(
-    u32,
-    u32,
-    Vec<u8>,
-) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Frame, RpcError>> + Send>>
+pub fn create_template_engine_dispatcher(
+    session: Arc<RpcSession>,
+) -> impl Fn(Frame) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Frame, RpcError>> + Send>>
 + Send
 + Sync
 + 'static {
-    move |_channel_id, method_id, payload| {
+    move |request| {
         let engine = TemplateEngineImpl::new(session.clone());
         let server = TemplateEngineServer::new(engine);
-        Box::pin(async move { server.dispatch(method_id, &payload).await })
+        Box::pin(async move {
+            server
+                .dispatch(request.desc.method_id, request.payload_bytes())
+                .await
+        })
     }
 }

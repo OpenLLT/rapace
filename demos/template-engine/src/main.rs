@@ -23,7 +23,7 @@
 
 use std::sync::Arc;
 
-use rapace::{InProcTransport, RpcSession};
+use rapace::{RpcSession, Transport};
 
 // Import from library
 use rapace_template_engine::{
@@ -36,7 +36,7 @@ async fn main() {
     println!("=== Template Engine with Host Callbacks Demo ===\n");
 
     // Create a transport pair (in-memory for demo)
-    let (host_transport, cell_transport) = InProcTransport::pair();
+    let (host_transport, cell_transport) = Transport::inproc_pair();
 
     // Set up the value host with some test data
     let mut value_host_impl = ValueHostImpl::new();
@@ -122,13 +122,9 @@ async fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rapace::TransportHandle;
 
     /// Helper to run template engine scenario with RpcSession
-    async fn run_scenario<T: TransportHandle<SendPayload = Vec<u8>>>(
-        host_transport: T,
-        cell_transport: T,
-    ) {
+    async fn run_scenario(host_transport: Transport, cell_transport: Transport) {
         // Set up values
         let mut value_host_impl = ValueHostImpl::new();
         value_host_impl.set("user.name", "Alice");
@@ -164,13 +160,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_inproc_transport() {
-        let (host_transport, cell_transport) = InProcTransport::pair();
+        let (host_transport, cell_transport) = Transport::inproc_pair();
         run_scenario(host_transport, cell_transport).await;
     }
 
     #[tokio::test]
     async fn test_simple_placeholder() {
-        let (host_transport, cell_transport) = InProcTransport::pair();
+        let (host_transport, cell_transport) = Transport::inproc_pair();
 
         let mut value_host_impl = ValueHostImpl::new();
         value_host_impl.set("user.name", "Bob");
@@ -201,7 +197,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_multiple_placeholders() {
-        let (host_transport, cell_transport) = InProcTransport::pair();
+        let (host_transport, cell_transport) = Transport::inproc_pair();
 
         let mut value_host_impl = ValueHostImpl::new();
         value_host_impl.set("user.name", "Alice");
