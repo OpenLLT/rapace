@@ -9,7 +9,7 @@
 
 use rapace_core::{
     DecodeError, EncodeCtx, EncodeError, Frame, INLINE_PAYLOAD_SIZE, INLINE_PAYLOAD_SLOT,
-    MsgDescHot, RecvFrame, SendFrame, TransportError, TransportHandle,
+    MsgDescHot, RecvFrame, SendFrame, TransportError,
 };
 
 mod shared {
@@ -225,6 +225,9 @@ mod native {
         }
     }
 
+    // TODO: TransportHandle trait implementation commented out during API transition
+    // Will need to be updated to work with new Transport enum
+    /*
     impl<WS, M> TransportHandle for WebSocketTransport<WS, M>
     where
         WS: Stream<Item = Result<M, <WS as StreamErrorType>::Error>>
@@ -338,6 +341,7 @@ mod native {
             self.inner.closed.load(Ordering::Acquire)
         }
     }
+    */
 }
 
 // Feature: tungstenite
@@ -672,7 +676,8 @@ mod axum_impl {
     static_assertions::assert_impl_all!(AxumTransport: Send, Sync);
 }
 
-// Handle + Driver implementation for native targets
+// TODO: Handle + Driver implementation commented out during API transition
+/*
 #[cfg(not(target_arch = "wasm32"))]
 mod handle;
 
@@ -681,6 +686,7 @@ pub use handle::{
     DEFAULT_INBOUND_QUEUE_SIZE, DEFAULT_OUTBOUND_QUEUE_SIZE, DriverState, OutboundMsg,
     WebSocketConfig, WebSocketHandle, into_parts, into_parts_with_config,
 };
+*/
 
 // Re-exports for native targets
 #[cfg(not(target_arch = "wasm32"))]
@@ -744,6 +750,8 @@ mod wasm {
         }
     }
 
+    // TODO: TransportHandle trait implementation commented out during API transition
+    /*
     impl TransportHandle for WebSocketTransport {
         type SendPayload = Vec<u8>;
         type RecvPayload = Vec<u8>;
@@ -805,6 +813,7 @@ mod wasm {
             self.inner.closed.load(Ordering::Acquire)
         }
     }
+    */
 
     /// A wasm-compatible WebSocket wrapper.
     struct WasmWebSocket {

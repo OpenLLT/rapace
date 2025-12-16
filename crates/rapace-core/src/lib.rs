@@ -4,7 +4,7 @@
 //! - Frame descriptors ([`MsgDescHot`], [`MsgDescCold`])
 //! - Frame types ([`Frame`], [`RecvFrame`])
 //! - Message header ([`MsgHeader`])
-//! - Transport handle trait ([`TransportHandle`])
+//! - Transport enum ([`Transport`])
 //! - Encoding traits ([`EncodeCtx`], [`DecodeCtx`])
 //! - Error codes and flags ([`ErrorCode`], [`FrameFlags`], [`Encoding`])
 //! - Control payloads ([`ControlPayload`])

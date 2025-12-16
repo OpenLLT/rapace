@@ -10,7 +10,7 @@
 //!                        ┌─────────────────────────────────┐
 //!                        │           RpcSession            │
 //!                        ├─────────────────────────────────┤
-//!                        │  transport: Arc<T>              │
+//!                        │  transport: Transport          │
 //!                        │  pending: HashMap<channel_id,   │
 //!                        │           oneshot::Sender>      │
 //!                        │  tunnels: HashMap<channel_id,   │
@@ -84,8 +84,8 @@ use parking_lot::Mutex;
 use tokio::sync::{mpsc, oneshot};
 
 use crate::{
-    ErrorCode, Frame, FrameFlags, INLINE_PAYLOAD_SIZE, MsgDescHot, RpcError, TransportError,
-    TransportHandle,
+    ErrorCode, Frame, FrameFlags, INLINE_PAYLOAD_SIZE, MsgDescHot, RpcError, Transport,
+    TransportError,
 };
 
 const DEFAULT_MAX_PENDING: usize = 8192;
@@ -137,8 +137,8 @@ pub type BoxedDispatcher = Box<
 /// Only `RpcSession::run()` calls `transport.recv_frame()`. No other code should
 /// touch `recv_frame` directly. This prevents the race condition where multiple
 /// callers compete for incoming frames.
-pub struct RpcSession<T: TransportHandle> {
-    transport: T,
+pub struct RpcSession {
+    transport: Transport,
 
     /// Pending response waiters: channel_id -> oneshot sender.
     /// When a client sends a request, it registers a waiter here.
@@ -162,14 +162,14 @@ pub struct RpcSession<T: TransportHandle> {
     next_channel_id: AtomicU32,
 }
 
-impl<T: TransportHandle> RpcSession<T> {
+impl RpcSession {
     /// Create a new RPC session wrapping the given transport handle.
     ///
     /// The `start_channel_id` parameter allows different sessions to use different
     /// channel ID ranges, avoiding collisions in bidirectional RPC scenarios.
     /// - Odd IDs (1, 3, 5, ...): typically used by one side
     /// - Even IDs (2, 4, 6, ...): typically used by the other side
-    pub fn new(transport: T) -> Self {
+    pub fn new(transport: Transport) -> Self {
         Self::with_channel_start(transport, 1)
     }
 
@@ -179,7 +179,7 @@ impl<T: TransportHandle> RpcSession<T> {
     /// For bidirectional RPC over a single transport pair:
     /// - Host session: start at 1 (uses odd channel IDs)
     /// - Plugin session: start at 2 (uses even channel IDs)
-    pub fn with_channel_start(transport: T, start_channel_id: u32) -> Self {
+    pub fn with_channel_start(transport: Transport, start_channel_id: u32) -> Self {
         Self {
             transport,
             pending: Mutex::new(HashMap::new()),
@@ -191,7 +191,7 @@ impl<T: TransportHandle> RpcSession<T> {
     }
 
     /// Get a reference to the underlying transport.
-    pub fn transport(&self) -> &T {
+    pub fn transport(&self) -> &Transport {
         &self.transport
     }
 
@@ -519,19 +519,19 @@ impl<T: TransportHandle> RpcSession<T> {
         method_id: u32,
         payload: Vec<u8>,
     ) -> Result<ReceivedFrame, RpcError> {
-        struct PendingGuard<'a, T: TransportHandle<SendPayload = Vec<u8>>> {
-            session: &'a RpcSession<T>,
+        struct PendingGuard<'a> {
+            session: &'a RpcSession,
             channel_id: u32,
             active: bool,
         }
 
-        impl<'a, T: TransportHandle<SendPayload = Vec<u8>>> PendingGuard<'a, T> {
+        impl<'a> PendingGuard<'a> {
             fn disarm(&mut self) {
                 self.active = false;
             }
         }
 
-        impl<T: TransportHandle<SendPayload = Vec<u8>>> Drop for PendingGuard<'_, T> {
+        impl Drop for PendingGuard<'_> {
             fn drop(&mut self) {
                 if !self.active {
                     return;
@@ -843,78 +843,6 @@ pub fn parse_error_payload(payload: &[u8]) -> RpcError {
     let message = String::from_utf8_lossy(&payload[8..8 + message_len]).into_owned();
 
     RpcError::Status { code, message }
-}
-
-#[cfg(test)]
-mod pending_cleanup_tests {
-    use super::*;
-    use crate::{RecvFrame, SendFrame, TransportError};
-    use std::sync::atomic::AtomicBool;
-    use tokio::sync::mpsc;
-
-    /// A simple sink transport that implements TransportHandle for testing.
-    #[derive(Clone)]
-    struct SinkHandle {
-        tx: mpsc::Sender<SendFrame<Vec<u8>>>,
-        closed: Arc<AtomicBool>,
-    }
-
-    impl TransportHandle for SinkHandle {
-        type SendPayload = Vec<u8>;
-        type RecvPayload = Vec<u8>;
-
-        async fn send_frame(
-            &self,
-            frame: impl Into<SendFrame<Self::SendPayload>>,
-        ) -> Result<(), TransportError> {
-            self.tx
-                .send(frame)
-                .await
-                .map_err(|_| TransportError::Closed)
-        }
-
-        async fn recv_frame(&self) -> Result<RecvFrame<Self::RecvPayload>, TransportError> {
-            // Never returns a frame - just hangs until closed
-            std::future::pending().await
-        }
-
-        fn close(&self) {
-            self.closed.store(true, Ordering::SeqCst);
-        }
-
-        fn is_closed(&self) -> bool {
-            self.closed.load(Ordering::SeqCst)
-        }
-    }
-
-    #[tokio::test]
-    async fn test_call_cancellation_cleans_pending() {
-        let (tx, _rx) = mpsc::channel(8);
-        let client_handle = SinkHandle {
-            tx,
-            closed: Arc::new(AtomicBool::new(false)),
-        };
-        let client = Arc::new(RpcSession::with_channel_start(client_handle, 2));
-
-        let client2 = client.clone();
-        let channel_id = client.next_channel_id();
-        let task = tokio::spawn(async move {
-            let _ = client2.call(channel_id, 123, vec![1, 2, 3]).await;
-        });
-
-        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(1);
-        while !client.pending.lock().contains_key(&channel_id) {
-            if tokio::time::Instant::now() >= deadline {
-                panic!("call did not register pending waiter in time");
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(1)).await;
-        }
-
-        task.abort();
-        let _ = task.await;
-
-        assert_eq!(client.pending.lock().len(), 0);
-    }
 }
 
 // Note: RpcSession tests live in rapace-testkit to avoid circular dev-dependencies

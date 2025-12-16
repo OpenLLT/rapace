@@ -13,7 +13,7 @@ use std::sync::Arc;
 use parking_lot::Mutex;
 use rapace_core::{
     ControlPayload, ErrorCode, Frame, FrameFlags, MsgDescHot, NO_DEADLINE, RecvFrame, RpcError,
-    TransportError, TransportHandle, control_method,
+    Transport, TransportError, control_method,
 };
 
 /// Default initial credits for new channels (64KB).
@@ -173,7 +173,7 @@ impl ChannelState {
     }
 }
 
-/// Session wraps a TransportHandle and enforces RPC semantics.
+/// Session wraps a Transport and enforces RPC semantics.
 ///
 /// # Responsibilities
 ///
@@ -186,26 +186,26 @@ impl ChannelState {
 /// # Thread Safety
 ///
 /// Session is `Send + Sync` and can be shared via `Arc<Session<T>>`.
-pub struct Session<T: TransportHandle> {
-    transport: Arc<T>,
+pub struct Session {
+    transport: Arc<Transport>,
     /// Per-channel state. Channel 0 is the control channel.
     channels: Mutex<HashMap<u32, ChannelState>>,
     /// Bounded set of channels that are fully closed/cancelled (drop late frames, prevent re-open).
     tombstones: Mutex<Tombstones>,
 }
 
-impl<T: TransportHandle<SendPayload = Vec<u8>>> Session<T> {
+impl Session {
     /// Create a new session wrapping the given transport.
-    pub fn new(transport: T) -> Self {
+    pub fn new(transport: Transport) -> Self {
         Self {
-            transport,
+            transport: Arc::new(transport),
             channels: Mutex::new(HashMap::new()),
             tombstones: Mutex::new(Tombstones::new(max_tombstones())),
         }
     }
 
     /// Get a reference to the underlying transport.
-    pub fn transport(&self) -> &T {
+    pub fn transport(&self) -> &Transport {
         &self.transport
     }
 
@@ -325,7 +325,7 @@ impl<T: TransportHandle<SendPayload = Vec<u8>>> Session<T> {
     /// - Tracks EOS to transition channel state.
     /// - Drops data frames for cancelled/closed channels.
     /// - Returns frames that should be dispatched.
-    pub async fn recv_frame(&self) -> Result<RecvFrame<T::RecvPayload>, TransportError> {
+    pub async fn recv_frame(&self) -> Result<RecvFrame<Vec<u8>>, TransportError> {
         loop {
             let frame = self.transport.recv_frame().await?;
 
@@ -498,7 +498,7 @@ impl<T: TransportHandle<SendPayload = Vec<u8>>> Session<T> {
     }
 
     /// Process a control frame, updating session state.
-    fn process_control_frame(&self, frame: &RecvFrame<T::RecvPayload>) {
+    fn process_control_frame(&self, frame: &RecvFrame<Vec<u8>>) {
         match frame.desc.method_id {
             control_method::CANCEL_CHANNEL => {
                 // Try to decode CancelChannel payload

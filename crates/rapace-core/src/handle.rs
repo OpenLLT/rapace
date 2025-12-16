@@ -1,51 +1,73 @@
-//! Handle + Driver transport abstraction.
+//! Unified transport enum.
 //!
-//! This module provides the new transport abstraction where:
-//! - `TransportHandle` is the public API for sending/receiving frames
-//! - `TransportDriver` is a future that owns the I/O and runs the mux/demux loop
-//!
-//! The handle is cheap to clone and can be shared across tasks.
-//! The driver must be spawned (or polled) by the caller.
+//! Previously rapace exposed a `TransportHandle` trait implemented by each
+//! transport crate. We're moving toward a single `Transport` enum that carries
+//! concrete transport implementations (mem, stream, shm, websocket) behind
+//! feature flags so higher layers no longer need generics to talk to a
+//! transport. For now the variants contain stub structs; the real transports
+//! will migrate here as the merge progresses.
 
-use std::future::Future;
 use std::ops::Deref;
-use std::pin::Pin;
 
 use crate::TransportError;
 
-/// A handle for sending and receiving frames.
-///
-/// This is the public API for transport I/O. The handle is cheap to clone
-/// and can be shared across tasks. Internally it communicates with a
-/// driver task that owns the actual I/O object.
-///
-/// Payload types are transport-specific:
-/// - Stream/WebSocket: pooled buffers or `Bytes`
-/// - SHM: slot guards
-pub trait TransportHandle: Send + Sync + Clone + 'static {
-    /// Payload type for sending (must be 'static, owned).
-    type SendPayload: Deref<Target = [u8]> + Send + 'static;
-
-    /// Payload type for receiving.
-    type RecvPayload: Deref<Target = [u8]> + Send + 'static;
-
-    /// Send a frame. Awaits if backpressure is applied.
-    fn send_frame(
-        &self,
-        frame: impl Into<SendFrame<Self::SendPayload>> + Send + 'static,
-    ) -> impl Future<Output = Result<(), TransportError>> + Send;
-
-    /// Receive a frame.
-    fn recv_frame(
-        &self,
-    ) -> impl Future<Output = Result<RecvFrame<Self::RecvPayload>, TransportError>> + Send;
-
-    /// Signal close. Non-blocking, initiates graceful shutdown.
-    fn close(&self);
-
-    /// Check if the transport is closed or failed.
-    fn is_closed(&self) -> bool;
+/// Transport variants (stubbed for now).
+#[derive(Clone, Debug)]
+pub enum Transport {
+    /// In-process transport (feature `mem`).
+    #[cfg(feature = "mem")]
+    Mem(MemTransportStub),
+    /// Stream transport (feature `stream`).
+    #[cfg(feature = "stream")]
+    Stream(StreamTransportStub),
+    /// Shared-memory transport (feature `shm`).
+    #[cfg(feature = "shm")]
+    Shm(ShmTransportStub),
+    /// WebSocket transport (feature `websocket`).
+    #[cfg(feature = "websocket")]
+    WebSocket(WebSocketTransportStub),
 }
+
+impl Transport {
+    /// Send a frame using the selected transport.
+    pub async fn send_frame(
+        &self,
+        _frame: impl Into<SendFrame<Vec<u8>>> + Send + 'static,
+    ) -> Result<(), TransportError> {
+        todo!("Transport::send_frame: wire up concrete transport variants")
+    }
+
+    /// Receive the next frame.
+    pub async fn recv_frame(&self) -> Result<crate::RecvFrame<Vec<u8>>, TransportError> {
+        todo!("Transport::recv_frame: wire up concrete transport variants")
+    }
+
+    /// Initiate shutdown.
+    pub fn close(&self) {
+        todo!("Transport::close: wire up concrete transport variants")
+    }
+
+    /// Returns true if the underlying transport is closed.
+    pub fn is_closed(&self) -> bool {
+        todo!("Transport::is_closed: wire up concrete transport variants")
+    }
+}
+
+#[cfg(feature = "mem")]
+#[derive(Clone, Debug)]
+pub struct MemTransportStub;
+
+#[cfg(feature = "stream")]
+#[derive(Clone, Debug)]
+pub struct StreamTransportStub;
+
+#[cfg(feature = "shm")]
+#[derive(Clone, Debug)]
+pub struct ShmTransportStub;
+
+#[cfg(feature = "websocket")]
+#[derive(Clone, Debug)]
+pub struct WebSocketTransportStub;
 
 /// Frame for sending with generic payload.
 #[derive(Debug, Clone)]
@@ -133,37 +155,6 @@ impl From<SendFrame<Vec<u8>>> for crate::Frame {
             payload: send_frame.payload,
         }
     }
-}
-
-/// Received frame with owned descriptor and a payload handle.
-///
-/// Re-exported from frame.rs for convenience.
-pub use crate::RecvFrame;
-
-/// The driver future type.
-///
-/// This is a boxed future that owns the I/O object and runs the mux/demux loop.
-/// The caller must spawn or poll this future.
-///
-/// For SHM transport, this can be a no-op future if no background work is needed.
-pub type TransportDriver =
-    Pin<Box<dyn Future<Output = Result<(), TransportError>> + Send + 'static>>;
-
-/// Result of splitting a transport into handle + driver.
-pub struct TransportParts<H> {
-    /// The handle for sending/receiving frames.
-    pub handle: H,
-    /// The driver future to spawn.
-    pub driver: TransportDriver,
-}
-
-/// Trait for types that can be split into handle + driver.
-pub trait IntoTransportParts {
-    /// The handle type.
-    type Handle: TransportHandle;
-
-    /// Split into handle + driver.
-    fn into_parts(self) -> TransportParts<Self::Handle>;
 }
 
 // QoS types for future use

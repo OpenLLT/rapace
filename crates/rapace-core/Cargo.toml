@@ -6,6 +6,13 @@ license.workspace = true
 repository.workspace = true
 description = "Core types and traits for rapace RPC"
 
+[features]
+default = ["mem", "stream"]
+mem = []
+stream = []
+shm = []
+websocket = []
+
 [package.metadata.docs.rs]
 rustdoc-args = ["--html-in-header", "arborium-header.html"]
 
@@ -15,6 +22,7 @@ rustdoc-args = ["--html-in-header", "arborium-header.html"]
 [dependencies]
 async-stream.workspace = true
 bitflags.workspace = true
+enum_dispatch = "0.3.12"
 facet.workspace = true
 futures.workspace = true
 futures-timeout.workspace = true
