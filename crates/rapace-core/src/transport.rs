@@ -67,7 +67,7 @@ impl Transport {
         (Transport::Stream(a), Transport::Stream(b))
     }
 
-    #[cfg(all(feature = "websocket", not(target_arch = "wasm32")))]
+    #[cfg(all(feature = "websocket-tungstenite", not(target_arch = "wasm32")))]
     pub fn websocket<S>(ws: tokio_tungstenite::WebSocketStream<S>) -> Self
     where
         S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
@@ -75,10 +75,15 @@ impl Transport {
         Transport::WebSocket(websocket::WebSocketTransport::new(ws))
     }
 
-    #[cfg(all(feature = "websocket", not(target_arch = "wasm32")))]
+    #[cfg(all(feature = "websocket-tungstenite", not(target_arch = "wasm32")))]
     pub async fn websocket_pair() -> (Self, Self) {
         let (a, b) = websocket::WebSocketTransport::pair().await;
         (Transport::WebSocket(a), Transport::WebSocket(b))
+    }
+
+    #[cfg(all(feature = "websocket-axum", not(target_arch = "wasm32")))]
+    pub fn websocket_axum(ws: axum::extract::ws::WebSocket) -> Self {
+        Transport::WebSocket(websocket::WebSocketTransport::from_axum(ws))
     }
 }
 

@@ -46,8 +46,11 @@ default = ["mem", "stream", "shm"]
 # Transport features
 mem = ["rapace-core/mem"]
 stream = ["rapace-core/stream", "dep:tokio"]
-websocket = ["rapace-core/websocket"]
+websocket = ["websocket-tungstenite"]
+websocket-tungstenite = ["rapace-core/websocket-tungstenite"]
+websocket-axum = ["rapace-core/websocket-axum"]
+websocket-wasm = ["rapace-core/websocket-wasm"]
 shm = ["rapace-core/shm"]
 
 # All transports
-full = ["mem", "stream", "websocket", "shm"]
+full = ["mem", "stream", "websocket-tungstenite", "shm"]
